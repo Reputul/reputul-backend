@@ -1,5 +1,6 @@
 package com.reputul.backend.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -29,4 +30,13 @@ public class Business {
     @ManyToOne
     @JoinColumn(name = "user_id")
     private User owner;
+
+    @OneToMany(mappedBy = "business", cascade = CascadeType.ALL)
+    @JsonIgnore // avoid infinite recursion
+    private java.util.List<Review> reviews;
+
+    @OneToOne(mappedBy = "business", cascade = CascadeType.ALL)
+    @JsonIgnore
+    private Subscription subscription;
+
 }
