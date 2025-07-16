@@ -1,36 +1,32 @@
 package com.reputul.backend.models;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
-import java.util.List;
-
 @Entity
-@Table(name = "users")
-@Data
+@Table(name = "users", uniqueConstraints = @UniqueConstraint(columnNames = "email"))
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class User {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @NotBlank(message = "Name is required")
     private String name;
 
-    @Column(unique = true, nullable = false)
+    @Email(message = "Invalid email format")
+    @NotBlank(message = "Email is required")
+    @Column(nullable = false, unique = true)
     private String email;
 
+    @NotBlank(message = "Password is required")
+    @Column(nullable = false)
     private String password;
-
-    @OneToMany(mappedBy = "owner", cascade = CascadeType.ALL)
-    @JsonIgnore
-    private java.util.List<Business> businesses;
-
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    @JsonIgnore
-    private List<Notification> notifications;
-
-
 }
