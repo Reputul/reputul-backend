@@ -4,6 +4,7 @@ import com.reputul.backend.models.Business;
 import com.reputul.backend.models.Review;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.ReviewRepository;
+import com.reputul.backend.services.BusinessService;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -15,10 +16,12 @@ public class ReviewController {
 
     private final ReviewRepository reviewRepo;
     private final BusinessRepository businessRepo;
+    private final BusinessService businessService;
 
-    public ReviewController(ReviewRepository reviewRepo, BusinessRepository businessRepo) {
+    public ReviewController(ReviewRepository reviewRepo, BusinessRepository businessRepo, BusinessService businessService) {
         this.reviewRepo = reviewRepo;
         this.businessRepo = businessRepo;
+        this.businessService = businessService;
     }
 
     @PostMapping("/{businessId}")
@@ -26,7 +29,13 @@ public class ReviewController {
         Business business = businessRepo.findById(businessId).orElseThrow();
         review.setBusiness(business);
         review.setCreatedAt(LocalDateTime.now());
-        return reviewRepo.save(review);
+
+        Review savedReview = reviewRepo.save(review);
+
+        // 🔁 Update reputation score
+        businessService.updateReputationScore(business);
+
+        return savedReview;
     }
 
     @GetMapping("/business/{businessId}")
