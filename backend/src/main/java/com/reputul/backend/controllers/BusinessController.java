@@ -1,9 +1,11 @@
 package com.reputul.backend.controllers;
 
+import com.reputul.backend.dto.BusinessResponse;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.UserRepository;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -39,4 +41,24 @@ public class BusinessController {
     public List<Business> getByUser(@PathVariable Long userId) {
         return businessRepo.findByOwnerId(userId);
     }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getBusinessById(@PathVariable Long id) {
+        return businessRepo.findById(id)
+                .map(business -> {
+                    BusinessResponse response = BusinessResponse.builder()
+                            .id(business.getId())
+                            .name(business.getName())
+                            .industry(business.getIndustry())
+                            .phone(business.getPhone())
+                            .website(business.getWebsite())
+                            .address(business.getAddress())
+                            .reputationScore(business.getReputationScore())
+                            .badge(business.getBadge())
+                            .build();
+                    return ResponseEntity.ok(response);
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
 }

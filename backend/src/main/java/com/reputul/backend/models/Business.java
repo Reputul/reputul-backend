@@ -25,6 +25,8 @@ public class Business {
 
     private Double reputationScore;
 
+    private String badge; // 👈 Badge added here
+
     private LocalDateTime createdAt;
 
     @ManyToOne
@@ -32,11 +34,10 @@ public class Business {
     private User owner;
 
     @OneToMany(mappedBy = "business", cascade = CascadeType.ALL)
-    @JsonIgnore // avoid infinite recursion
+    @JsonIgnore
     private java.util.List<Review> reviews;
 
     @OneToOne(mappedBy = "business", cascade = CascadeType.ALL)
     @JsonIgnore
     private Subscription subscription;
-
 }
