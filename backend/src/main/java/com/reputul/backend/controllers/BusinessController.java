@@ -6,6 +6,8 @@ import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.UserRepository;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -29,9 +31,12 @@ public class BusinessController {
     }
 
     @PostMapping
-    public Business createBusiness(@RequestBody Business business) {
-        // Attach to user (hardcoded for now — replace with real user later)
-        User owner = userRepo.findById(1L).orElseThrow(); // TEMP
+    public Business createBusiness(@RequestBody Business business,
+                                   @AuthenticationPrincipal UserDetails userDetails) {
+        String email = userDetails.getUsername();
+        User owner = userRepo.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
+
         business.setOwner(owner);
         business.setCreatedAt(LocalDateTime.now());
         return businessRepo.save(business);

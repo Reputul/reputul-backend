@@ -2,6 +2,8 @@ package com.reputul.backend.auth;
 
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
@@ -12,8 +14,16 @@ import java.util.function.Function;
 @Component
 public class JwtUtil {
 
-    private final Key key = Keys.secretKeyFor(SignatureAlgorithm.HS256);
+    @Value("${jwt.secret}")
+    private String secret;
+
+    private Key key;
     private final long EXPIRATION_TIME = 1000 * 60 * 60 * 24; // 24 hours
+
+    @PostConstruct
+    public void init() {
+        this.key = Keys.hmacShaKeyFor(secret.getBytes());
+    }
 
     // Generate JWT
     public String generateToken(String username) {
