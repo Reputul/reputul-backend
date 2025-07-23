@@ -1,7 +1,6 @@
 package com.reputul.backend.auth;
 
-import com.reputul.backend.dto.LoginRequest;
-import com.reputul.backend.dto.LoginResponse;
+import com.reputul.backend.dto.LoginRequestDto;
 import com.reputul.backend.models.User;
 import com.reputul.backend.payload.RegisterRequest;
 import com.reputul.backend.repositories.UserRepository;
@@ -32,7 +31,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<?> login(@RequestBody LoginRequestDto request) {
         Authentication auth = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
                         request.getEmail(),

@@ -6,7 +6,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class BusinessResponse {
+public class BusinessResponseDto {
     private Long id;
     private String name;
     private String industry;
@@ -15,4 +15,5 @@ public class BusinessResponse {
     private String address;
     private Double reputationScore;
     private String badge;
+    private int reviewCount;
 }

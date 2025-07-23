@@ -1,6 +1,6 @@
 package com.reputul.backend.controllers;
 
-import com.reputul.backend.dto.BusinessResponse;
+import com.reputul.backend.dto.BusinessResponseDto;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
@@ -46,7 +46,7 @@ public class BusinessController {
     public ResponseEntity<?> getBusinessById(@PathVariable Long id) {
         return businessRepo.findById(id)
                 .map(business -> {
-                    BusinessResponse response = BusinessResponse.builder()
+                    BusinessResponseDto response = BusinessResponseDto.builder()
                             .id(business.getId())
                             .name(business.getName())
                             .industry(business.getIndustry())
