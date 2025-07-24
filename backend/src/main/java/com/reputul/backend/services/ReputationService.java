@@ -13,12 +13,21 @@ public class ReputationService {
 
     private final ReviewRepository reviewRepo;
     private final BusinessRepository businessRepo;
+    private final BadgeService badgeService;
 
-    public ReputationService(ReviewRepository reviewRepo, BusinessRepository businessRepo) {
+    public ReputationService(
+            ReviewRepository reviewRepo,
+            BusinessRepository businessRepo,
+            BadgeService badgeService
+    ) {
         this.reviewRepo = reviewRepo;
         this.businessRepo = businessRepo;
+        this.badgeService = badgeService;
     }
 
+    /**
+     * Calculates a weighted reputation score for a business based on average rating and review volume.
+     */
     public double getReputationScore(Long businessId) {
         List<Review> reviews = reviewRepo.findByBusinessId(businessId);
 
@@ -29,27 +38,22 @@ public class ReputationService {
                 .average()
                 .orElse(0.0);
 
-        double volumeWeight = Math.log10(reviews.size() + 1);
+        double volumeWeight = Math.log10(reviews.size() + 1); // smooths early low-volume spikes
 
         return Math.round(average * volumeWeight * 10.0) / 10.0;
     }
 
-    public String assignBadge(double score) {
-        if (score >= 9.0) return "Top Rated";
-        if (score >= 7.0) return "Excellent";
-        if (score >= 5.0) return "Good";
-        return "Needs Improvement";
-    }
-
+    /**
+     * Recalculates and updates both the reputation score and the badge for a business.
+     */
     public void updateBusinessReputationAndBadge(Long businessId) {
-        Business business = businessRepo.findById(businessId).orElseThrow();
+        Business business = businessRepo.findById(businessId)
+                .orElseThrow(() -> new RuntimeException("Business not found"));
 
         double score = getReputationScore(businessId);
-        String badge = assignBadge(score);
-
         business.setReputationScore(score);
-        business.setBadge(badge);
 
-        businessRepo.save(business);
+        String badge = badgeService.updateBusinessBadge(business); // Sets the badge field
+        businessRepo.save(business); // Save updated score and badge
     }
 }

@@ -15,9 +15,10 @@ public class BusinessService {
         this.reputationService = reputationService;
     }
 
+    /**
+     * Triggers a full recalculation of reputation score and badge for the given business.
+     */
     public void updateReputationScore(Business business) {
-        double score = reputationService.getReputationScore(business.getId());
-        business.setReputationScore(score);
-        businessRepo.save(business);
+        reputationService.updateBusinessReputationAndBadge(business.getId());
     }
 }

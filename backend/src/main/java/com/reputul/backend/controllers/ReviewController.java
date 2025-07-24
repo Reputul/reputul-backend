@@ -38,6 +38,7 @@ public class ReviewController {
         this.jwtUtil = jwtUtil;
     }
 
+    // ✅ Authenticated internal review submission
     @PostMapping("/{businessId}")
     public Review createReview(@PathVariable Long businessId, @RequestBody Review review) {
         Business business = businessRepo.findById(businessId).orElseThrow();
@@ -46,12 +47,16 @@ public class ReviewController {
 
         Review savedReview = reviewRepo.save(review);
         reputationService.updateBusinessReputationAndBadge(businessId);
+
         return savedReview;
     }
 
-    // ✅ NEW: Manually submit a review for the authenticated owner's business
+    // ✅ Manual review by business owner (from dashboard)
     @PostMapping("/manual")
-    public ResponseEntity<?> createManualReview(@RequestBody Review review, @RequestHeader("Authorization") String authHeader) {
+    public ResponseEntity<?> createManualReview(
+            @RequestBody Review review,
+            @RequestHeader("Authorization") String authHeader
+    ) {
         String token = authHeader.replace("Bearer ", "");
         String email = jwtUtil.extractUsername(token);
         User user = userRepo.findByEmail(email).orElseThrow();
@@ -68,11 +73,36 @@ public class ReviewController {
         return ResponseEntity.ok("Review added manually.");
     }
 
+    // ✅ Public-facing review submission (unauthenticated)
+    @PostMapping("/public/{businessId}")
+    public ResponseEntity<?> createPublicReview(
+            @PathVariable Long businessId,
+            @RequestBody Review review
+    ) {
+        return businessRepo.findById(businessId)
+                .map(business -> {
+                    if (review.getRating() < 1 || review.getRating() > 5) {
+                        return ResponseEntity.badRequest().body("Rating must be between 1 and 5.");
+                    }
+
+                    review.setBusiness(business);
+                    review.setCreatedAt(LocalDateTime.now());
+                    reviewRepo.save(review);
+
+                    reputationService.updateBusinessReputationAndBadge(businessId);
+
+                    return ResponseEntity.ok("Review submitted successfully.");
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    // ✅ All reviews for a specific business
     @GetMapping("/business/{businessId}")
     public List<Review> getReviewsByBusiness(@PathVariable Long businessId) {
         return reviewRepo.findByBusinessId(businessId);
     }
 
+    // ✅ All reviews (admin/debug)
     @GetMapping
     public List<Review> getAllReviews() {
         return reviewRepo.findAll();

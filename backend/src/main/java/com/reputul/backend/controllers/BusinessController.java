@@ -1,9 +1,12 @@
 package com.reputul.backend.controllers;
 
 import com.reputul.backend.dto.BusinessResponseDto;
+import com.reputul.backend.dto.ReviewSummaryDto;
 import com.reputul.backend.models.Business;
+import com.reputul.backend.models.Review;
 import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
+import com.reputul.backend.repositories.ReviewRepository;
 import com.reputul.backend.repositories.UserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -19,10 +22,12 @@ public class BusinessController {
 
     private final BusinessRepository businessRepo;
     private final UserRepository userRepo;
+    private final ReviewRepository reviewRepo;
 
-    public BusinessController(BusinessRepository businessRepo, UserRepository userRepo) {
+    public BusinessController(BusinessRepository businessRepo, UserRepository userRepo, ReviewRepository reviewRepo) {
         this.businessRepo = businessRepo;
         this.userRepo = userRepo;
+        this.reviewRepo = reviewRepo;
     }
 
     @GetMapping
@@ -66,4 +71,24 @@ public class BusinessController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/{id}/review-summary")
+    public ResponseEntity<?> getReviewSummary(@PathVariable Long id) {
+        Business business = businessRepo.findById(id)
+                .orElse(null);
+
+        if (business == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        double avgRating = reviewRepo.findAverageRatingByBusinessId(id) != null
+                ? reviewRepo.findAverageRatingByBusinessId(id) : 0.0;
+        int total = reviewRepo.countByBusinessId(id);
+        List<Review> recent = reviewRepo.findTop1ByBusinessIdOrderByCreatedAtDesc(id);
+        String comment = recent.isEmpty() ? "No reviews yet." : recent.get(0).getComment();
+
+        String badge = business.getBadge() != null ? business.getBadge() : "Unranked";
+
+        ReviewSummaryDto summary = new ReviewSummaryDto(avgRating, total, comment, badge);
+        return ResponseEntity.ok(summary);
+    }
 }
