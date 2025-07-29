@@ -1,6 +1,7 @@
 package com.reputul.backend.services;
 
 import com.reputul.backend.dto.*;
+import com.reputul.backend.models.Business;
 import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.EmailTemplate;
 import com.reputul.backend.models.User;
@@ -337,5 +338,20 @@ public class EmailTemplateService {
                 .createdAt(template.getCreatedAt())
                 .updatedAt(template.getUpdatedAt())
                 .build();
+    }
+
+    public String processTemplate(String template, Customer customer, Business business, String reviewLink) {
+        if (template == null) {
+            return "";
+        }
+
+        return template
+                .replace("{{customerName}}", customer.getName() != null ? customer.getName() : "")
+                .replace("{{businessName}}", business.getName() != null ? business.getName() : "")
+                .replace("{{serviceType}}", customer.getServiceType() != null ? customer.getServiceType() : "")
+                .replace("{{serviceDate}}", customer.getServiceDate() != null ? customer.getServiceDate().toString() : "")
+                .replace("{{businessPhone}}", business.getPhone() != null ? business.getPhone() : "")
+                .replace("{{businessWebsite}}", business.getWebsite() != null ? business.getWebsite() : "")
+                .replace("{{reviewLink}}", reviewLink != null ? reviewLink : "");
     }
 }
