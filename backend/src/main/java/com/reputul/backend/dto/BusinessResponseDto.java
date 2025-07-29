@@ -16,4 +16,5 @@ public class BusinessResponseDto {
     private Double reputationScore;
     private String badge;
     private int reviewCount;
+    private Boolean reviewPlatformsConfigured;
 }

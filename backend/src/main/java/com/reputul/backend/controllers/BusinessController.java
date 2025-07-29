@@ -1,7 +1,9 @@
 package com.reputul.backend.controllers;
 
 import com.reputul.backend.dto.BusinessResponseDto;
+import com.reputul.backend.dto.BusinessReviewPlatformsDto;
 import com.reputul.backend.dto.ReviewSummaryDto;
+import com.reputul.backend.dto.UpdateBusinessReviewPlatformsDto;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.Review;
 import com.reputul.backend.models.User;
@@ -10,12 +12,15 @@ import com.reputul.backend.repositories.ReviewRepository;
 import com.reputul.backend.repositories.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -75,6 +80,7 @@ public class BusinessController {
                             .reputationScore(business.getReputationScore())
                             .badge(business.getBadge())
                             .reviewCount(business.getReviews() != null ? business.getReviews().size() : 0)
+                            .reviewPlatformsConfigured(business.getReviewPlatformsConfigured())
                             .build();
                     return ResponseEntity.ok(response);
                 })
@@ -168,5 +174,134 @@ public class BusinessController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error deleting business: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/{businessId}/review-platforms")
+    public ResponseEntity<BusinessReviewPlatformsDto> getBusinessReviewPlatforms(
+            @PathVariable Long businessId,
+            Authentication authentication) {
+        try {
+            User user = getCurrentUser(authentication);
+
+            // Verify business belongs to user
+            Business business = businessRepo.findByIdAndOwnerId(businessId, user.getId())
+                    .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
+
+            BusinessReviewPlatformsDto dto = BusinessReviewPlatformsDto.builder()
+                    .businessId(business.getId())
+                    .businessName(business.getName())
+                    .googlePlaceId(business.getGooglePlaceId())
+                    .facebookPageUrl(business.getFacebookPageUrl())
+                    .yelpPageUrl(business.getYelpPageUrl())
+                    .reviewPlatformsConfigured(business.getReviewPlatformsConfigured())
+                    .build();
+
+            return ResponseEntity.ok(dto);
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PutMapping("/{businessId}/review-platforms")
+    public ResponseEntity<BusinessReviewPlatformsDto> updateBusinessReviewPlatforms(
+            @PathVariable Long businessId,
+            @RequestBody UpdateBusinessReviewPlatformsDto request,
+            Authentication authentication) {
+        try {
+            User user = getCurrentUser(authentication);
+
+            // Verify business belongs to user
+            Business business = businessRepo.findByIdAndOwnerId(businessId, user.getId())
+                    .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
+
+            // Update review platform information
+            business.setGooglePlaceId(request.getGooglePlaceId());
+            business.setFacebookPageUrl(request.getFacebookPageUrl());
+            business.setYelpPageUrl(request.getYelpPageUrl());
+
+            // Mark as configured if at least one platform is set
+            boolean isConfigured = (request.getGooglePlaceId() != null && !request.getGooglePlaceId().trim().isEmpty()) ||
+                    (request.getFacebookPageUrl() != null && !request.getFacebookPageUrl().trim().isEmpty()) ||
+                    (request.getYelpPageUrl() != null && !request.getYelpPageUrl().trim().isEmpty());
+
+            business.setReviewPlatformsConfigured(isConfigured);
+
+            Business savedBusiness = businessRepo.save(business);
+
+            BusinessReviewPlatformsDto dto = BusinessReviewPlatformsDto.builder()
+                    .businessId(savedBusiness.getId())
+                    .businessName(savedBusiness.getName())
+                    .googlePlaceId(savedBusiness.getGooglePlaceId())
+                    .facebookPageUrl(savedBusiness.getFacebookPageUrl())
+                    .yelpPageUrl(savedBusiness.getYelpPageUrl())
+                    .reviewPlatformsConfigured(savedBusiness.getReviewPlatformsConfigured())
+                    .build();
+
+            return ResponseEntity.ok(dto);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @PostMapping("/{businessId}/review-platforms/validate")
+    public ResponseEntity<Map<String, Object>> validateReviewPlatforms(
+            @PathVariable Long businessId,
+            @RequestBody UpdateBusinessReviewPlatformsDto request,
+            Authentication authentication) {
+        try {
+            User user = getCurrentUser(authentication);
+
+            // Verify business belongs to user
+            businessRepo.findByIdAndOwnerId(businessId, user.getId())
+                    .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
+
+            Map<String, Object> validation = new HashMap<>();
+
+            // Validate Google Place ID format
+            if (request.getGooglePlaceId() != null && !request.getGooglePlaceId().trim().isEmpty()) {
+                String placeId = request.getGooglePlaceId().trim();
+                boolean validGoogleId = placeId.length() > 10; // Basic validation
+                validation.put("googleValid", validGoogleId);
+                if (validGoogleId) {
+                    validation.put("googleReviewUrl", "https://search.google.com/local/writereview?placeid=" + placeId);
+                }
+            }
+
+            // Validate Facebook URL format
+            if (request.getFacebookPageUrl() != null && !request.getFacebookPageUrl().trim().isEmpty()) {
+                String fbUrl = request.getFacebookPageUrl().trim();
+                boolean validFacebookUrl = fbUrl.contains("facebook.com/");
+                validation.put("facebookValid", validFacebookUrl);
+                if (validFacebookUrl) {
+                    if (!fbUrl.endsWith("/")) fbUrl += "/";
+                    if (!fbUrl.endsWith("reviews/")) fbUrl += "reviews/";
+                    validation.put("facebookReviewUrl", fbUrl);
+                }
+            }
+
+            // Validate Yelp URL format
+            if (request.getYelpPageUrl() != null && !request.getYelpPageUrl().trim().isEmpty()) {
+                String yelpUrl = request.getYelpPageUrl().trim();
+                boolean validYelpUrl = yelpUrl.contains("yelp.com/");
+                validation.put("yelpValid", validYelpUrl);
+                if (validYelpUrl) {
+                    if (!yelpUrl.contains("#") && !yelpUrl.contains("writeareview")) {
+                        if (!yelpUrl.endsWith("/")) yelpUrl += "/";
+                        yelpUrl += "writeareview";
+                    }
+                    validation.put("yelpReviewUrl", yelpUrl);
+                }
+            }
+
+            return ResponseEntity.ok(validation);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    private User getCurrentUser(Authentication authentication) {
+        String email = authentication.getName();
+        return userRepo.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
     }
 }

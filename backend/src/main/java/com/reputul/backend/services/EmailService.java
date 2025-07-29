@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.util.Map;
 
 @Service
 @Slf4j
@@ -29,10 +28,15 @@ public class EmailService {
     private String baseUrl;
 
     public EmailService(@Value("${sendgrid.api.key}") String apiKey) {
+        log.info("Initializing EmailService with API key: {}...",
+                apiKey != null ? apiKey.substring(0, Math.min(10, apiKey.length())) : "null");
         this.sendGrid = new SendGrid(apiKey);
     }
 
     public boolean sendReviewRequest(Customer customer, Business business, String subject, String body, String reviewLink) {
+        log.info("Attempting to send review request to: {}", customer.getEmail());
+        log.info("From email: {}, From name: {}", fromEmail, business.getName());
+
         try {
             Email from = new Email(fromEmail, business.getName());
             Email to = new Email(customer.getEmail(), customer.getName());
@@ -40,6 +44,10 @@ public class EmailService {
             // Replace variables in the email body
             String processedBody = processEmailTemplate(body, customer, business, reviewLink);
             String processedSubject = processEmailTemplate(subject, customer, business, reviewLink);
+
+            log.info("Processed subject: {}", processedSubject);
+            log.info("Processed body preview: {}...",
+                    processedBody.length() > 100 ? processedBody.substring(0, 100) : processedBody);
 
             Content content = new Content("text/html", processedBody);
             Mail mail = new Mail(from, processedSubject, to, content);
@@ -49,19 +57,39 @@ public class EmailService {
             request.setEndpoint("mail/send");
             request.setBody(mail.build());
 
+            log.info("Sending request to SendGrid...");
             Response response = sendGrid.api(request);
 
-            log.info("Email sent to {} - Status: {}", customer.getEmail(), response.getStatusCode());
+            log.info("SendGrid Response - Status: {}", response.getStatusCode());
+            log.info("SendGrid Response - Body: {}", response.getBody());
+            log.info("SendGrid Response - Headers: {}", response.getHeaders());
 
-            return response.getStatusCode() >= 200 && response.getStatusCode() < 300;
+            boolean success = response.getStatusCode() >= 200 && response.getStatusCode() < 300;
+
+            if (success) {
+                log.info("✅ Email sent successfully to {}", customer.getEmail());
+            } else {
+                log.error("❌ SendGrid failed with status {}: {}", response.getStatusCode(), response.getBody());
+            }
+
+            return success;
 
         } catch (IOException e) {
-            log.error("Failed to send email to {}: {}", customer.getEmail(), e.getMessage());
+            log.error("❌ IOException sending email to {}: {}", customer.getEmail(), e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("❌ Unexpected error sending email to {}: {}", customer.getEmail(), e.getMessage(), e);
             return false;
         }
     }
 
     public boolean sendTestEmail(String toEmail, String subject, String body) {
+        log.info("=== SENDGRID TEST EMAIL ===");
+        log.info("To: {}", toEmail);
+        log.info("From: {} ({})", fromEmail, fromName);
+        log.info("Subject: {}", subject);
+        log.info("Body: {}", body);
+
         try {
             Email from = new Email(fromEmail, fromName);
             Email to = new Email(toEmail);
@@ -69,19 +97,35 @@ public class EmailService {
             Content content = new Content("text/html", body);
             Mail mail = new Mail(from, subject, to, content);
 
+            log.info("Mail object created: {}", mail.build());
+
             Request request = new Request();
             request.setMethod(Method.POST);
             request.setEndpoint("mail/send");
             request.setBody(mail.build());
 
+            log.info("Making SendGrid API call...");
             Response response = sendGrid.api(request);
 
-            log.info("Test email sent to {} - Status: {}", toEmail, response.getStatusCode());
+            log.info("SendGrid Test Response - Status: {}", response.getStatusCode());
+            log.info("SendGrid Test Response - Body: {}", response.getBody());
+            log.info("SendGrid Test Response - Headers: {}", response.getHeaders());
 
-            return response.getStatusCode() >= 200 && response.getStatusCode() < 300;
+            boolean success = response.getStatusCode() >= 200 && response.getStatusCode() < 300;
+
+            if (success) {
+                log.info("✅ Test email sent successfully to {}", toEmail);
+            } else {
+                log.error("❌ Test email failed with status {}: {}", response.getStatusCode(), response.getBody());
+            }
+
+            return success;
 
         } catch (IOException e) {
-            log.error("Failed to send test email to {}: {}", toEmail, e.getMessage());
+            log.error("❌ IOException sending test email: {}", e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            log.error("❌ Unexpected error sending test email: {}", e.getMessage(), e);
             return false;
         }
     }

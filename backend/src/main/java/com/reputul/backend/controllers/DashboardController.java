@@ -40,6 +40,7 @@ public class DashboardController {
                 .reputationScore(b.getReputationScore())
                 .badge(b.getBadge())
                 .reviewCount(b.getReviews() != null ? b.getReviews().size() : 0)
+                .reviewPlatformsConfigured(b.getReviewPlatformsConfigured()) // ADD THIS LINE!
                 .build()
         ).toList();
     }

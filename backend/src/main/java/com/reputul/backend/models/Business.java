@@ -29,6 +29,14 @@ public class Business {
 
     private LocalDateTime createdAt;
 
+    // NEW: Review Platform Integration Fields
+    private String googlePlaceId;
+    private String facebookPageUrl;
+    private String yelpPageUrl;
+
+    @Builder.Default
+    private Boolean reviewPlatformsConfigured = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User owner;
@@ -40,6 +48,7 @@ public class Business {
     @OneToOne(mappedBy = "business", cascade = CascadeType.ALL)
     @JsonIgnore
     private Subscription subscription;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
