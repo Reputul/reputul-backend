@@ -8,6 +8,7 @@ import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.ReviewRepository;
 import com.reputul.backend.repositories.UserRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/businesses")
@@ -36,15 +38,22 @@ public class BusinessController {
     }
 
     @PostMapping
-    public Business createBusiness(@RequestBody Business business,
-                                   @AuthenticationPrincipal UserDetails userDetails) {
-        String email = userDetails.getUsername();
-        User owner = userRepo.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
+    public ResponseEntity<?> createBusiness(@RequestBody Business business,
+                                            @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            String email = userDetails.getUsername();
+            User owner = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
 
-        business.setOwner(owner);
-        business.setCreatedAt(LocalDateTime.now());
-        return businessRepo.save(business);
+            business.setOwner(owner);
+            business.setCreatedAt(LocalDateTime.now());
+            Business savedBusiness = businessRepo.save(business);
+
+            return ResponseEntity.ok(savedBusiness);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error creating business: " + e.getMessage());
+        }
     }
 
     @GetMapping("/user/{userId}")
@@ -65,6 +74,7 @@ public class BusinessController {
                             .address(business.getAddress())
                             .reputationScore(business.getReputationScore())
                             .badge(business.getBadge())
+                            .reviewCount(business.getReviews() != null ? business.getReviews().size() : 0)
                             .build();
                     return ResponseEntity.ok(response);
                 })
@@ -90,5 +100,73 @@ public class BusinessController {
 
         ReviewSummaryDto summary = new ReviewSummaryDto(avgRating, total, comment, badge);
         return ResponseEntity.ok(summary);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateBusiness(@PathVariable Long id,
+                                            @RequestBody Business updatedBusiness,
+                                            @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            Optional<Business> optional = businessRepo.findById(id);
+            if (optional.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            Business biz = optional.get();
+
+            // Get the authenticated user
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // Check ownership
+            if (!biz.getOwner().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to update this business");
+            }
+
+            // Update business fields
+            biz.setName(updatedBusiness.getName());
+            biz.setIndustry(updatedBusiness.getIndustry());
+            biz.setPhone(updatedBusiness.getPhone());
+            biz.setWebsite(updatedBusiness.getWebsite());
+            biz.setAddress(updatedBusiness.getAddress());
+
+            businessRepo.save(biz);
+            return ResponseEntity.ok(biz);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error updating business: " + e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteBusiness(@PathVariable Long id,
+                                            @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            Optional<Business> optional = businessRepo.findById(id);
+            if (optional.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            Business biz = optional.get();
+
+            // Get the authenticated user
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // Check ownership
+            if (!biz.getOwner().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to delete this business");
+            }
+
+            businessRepo.delete(biz);
+            return ResponseEntity.ok().body("Business deleted successfully");
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error deleting business: " + e.getMessage());
+        }
     }
 }

@@ -25,11 +25,11 @@ public class Business {
 
     private Double reputationScore;
 
-    private String badge; // 👈 Badge added here
+    private String badge;
 
     private LocalDateTime createdAt;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User owner;
 
@@ -40,4 +40,8 @@ public class Business {
     @OneToOne(mappedBy = "business", cascade = CascadeType.ALL)
     @JsonIgnore
     private Subscription subscription;
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+    }
 }
