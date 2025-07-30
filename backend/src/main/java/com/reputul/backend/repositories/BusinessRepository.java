@@ -8,24 +8,24 @@ import java.util.List;
 import java.util.Optional;
 
 public interface BusinessRepository extends JpaRepository<Business, Long> {
-    List<Business> findByOwnerId(Long ownerId);
-    Optional<Business> findByIdAndOwnerId(Long id, Long ownerId);
+    List<Business> findByUserId(Long ownerId);
+    Optional<Business> findByIdAndUserId(Long id, Long ownerId);
 
     // Find business by ID and owner (security check)
-    Optional<Business> findByIdAndOwner(Long id, User owner);
+    Optional<Business> findByIdAndUser(Long id, User user);
 
     // Find all businesses for a specific owner
-    List<Business> findByOwner(User owner);
+    List<Business> findByUser(User user);
 
     // Check if business exists and belongs to user
-    boolean existsByIdAndOwner(Long id, User owner);
+    boolean existsByIdAndUser(Long id, User user);
 
     // Find businesses by platform configuration status
-    List<Business> findByOwnerAndReviewPlatformsConfigured(User owner, Boolean reviewPlatformsConfigured);
+    List<Business> findByUserAndReviewPlatformsConfigured(User user, Boolean reviewPlatformsConfigured);
 
     // Count businesses by platform configuration status
-    long countByOwnerAndReviewPlatformsConfigured(User owner, Boolean reviewPlatformsConfigured);
+    long countByUserAndReviewPlatformsConfigured(User user, Boolean reviewPlatformsConfigured);
 
     // Find all businesses for owner ordered by creation date
-    List<Business> findByOwnerOrderByCreatedAtDesc(User owner);
+    List<Business> findByUserOrderByCreatedAtDesc(User user);
 }

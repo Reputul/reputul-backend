@@ -50,7 +50,7 @@ public class BusinessController {
             User owner = userRepo.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
 
-            business.setOwner(owner);
+            business.setUser(owner);
             business.setCreatedAt(LocalDateTime.now());
             Business savedBusiness = businessRepo.save(business);
 
@@ -63,7 +63,7 @@ public class BusinessController {
 
     @GetMapping("/user/{userId}")
     public List<Business> getByUser(@PathVariable Long userId) {
-        return businessRepo.findByOwnerId(userId);
+        return businessRepo.findByUserId(userId);
     }
 
     @GetMapping("/{id}")
@@ -126,7 +126,7 @@ public class BusinessController {
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
             // Check ownership
-            if (!biz.getOwner().getId().equals(user.getId())) {
+            if (!biz.getUser().getId().equals(user.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body("You don't have permission to update this business");
             }
@@ -163,7 +163,7 @@ public class BusinessController {
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
             // Check ownership
-            if (!biz.getOwner().getId().equals(user.getId())) {
+            if (!biz.getUser().getId().equals(user.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body("You don't have permission to delete this business");
             }
@@ -184,7 +184,7 @@ public class BusinessController {
             User user = getCurrentUser(authentication);
 
             // Verify business belongs to user
-            Business business = businessRepo.findByIdAndOwnerId(businessId, user.getId())
+            Business business = businessRepo.findByIdAndUserId(businessId, user.getId())
                     .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
 
             BusinessReviewPlatformsDto dto = BusinessReviewPlatformsDto.builder()
@@ -211,7 +211,7 @@ public class BusinessController {
             User user = getCurrentUser(authentication);
 
             // Verify business belongs to user
-            Business business = businessRepo.findByIdAndOwnerId(businessId, user.getId())
+            Business business = businessRepo.findByIdAndUserId(businessId, user.getId())
                     .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
 
             // Update review platform information
@@ -252,7 +252,7 @@ public class BusinessController {
             User user = getCurrentUser(authentication);
 
             // Verify business belongs to user
-            businessRepo.findByIdAndOwnerId(businessId, user.getId())
+            businessRepo.findByIdAndUserId(businessId, user.getId())
                     .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
 
             Map<String, Object> validation = new HashMap<>();

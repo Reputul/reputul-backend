@@ -28,7 +28,7 @@ public class DashboardController {
         String email = userDetails.getUsername();
         User user = userRepo.findByEmail(email).orElseThrow(); // fetch user by email
 
-        List<Business> businesses = businessRepo.findByOwnerId(user.getId()); // use existing method
+        List<Business> businesses = businessRepo.findByUserId(user.getId()); // use existing method
 
         return businesses.stream().map(b -> BusinessResponseDto.builder()
                 .id(b.getId())

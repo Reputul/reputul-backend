@@ -18,16 +18,16 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
 
     List<ReviewRequest> findByBusinessIdAndStatusOrderByCreatedAtDesc(Long businessId, ReviewRequest.RequestStatus status);
 
-    @Query("SELECT rr FROM ReviewRequest rr WHERE rr.business.id = :businessId AND rr.business.owner.id = :ownerId ORDER BY rr.createdAt DESC")
+    @Query("SELECT rr FROM ReviewRequest rr WHERE rr.business.id = :businessId AND rr.business.user.id = :ownerId ORDER BY rr.createdAt DESC")
     List<ReviewRequest> findByBusinessIdAndOwnerId(@Param("businessId") Long businessId, @Param("ownerId") Long ownerId);
 
-    @Query("SELECT rr FROM ReviewRequest rr WHERE rr.business.owner.id = :ownerId ORDER BY rr.createdAt DESC")
+    @Query("SELECT rr FROM ReviewRequest rr WHERE rr.business.user.id = :ownerId ORDER BY rr.createdAt DESC")
     List<ReviewRequest> findByOwnerId(@Param("ownerId") Long ownerId);
 
     long countByBusinessIdAndStatus(Long businessId, ReviewRequest.RequestStatus status);
 
     long countByBusinessIdAndCreatedAtAfter(Long businessId, LocalDateTime after);
 
-    @Query("SELECT COUNT(rr) FROM ReviewRequest rr WHERE rr.business.owner.id = :ownerId AND rr.createdAt >= :startDate")
+    @Query("SELECT COUNT(rr) FROM ReviewRequest rr WHERE rr.business.user.id = :ownerId AND rr.createdAt >= :startDate")
     long countByOwnerIdAndCreatedAtAfter(@Param("ownerId") Long ownerId, @Param("startDate") LocalDateTime startDate);
 }

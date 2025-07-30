@@ -7,6 +7,7 @@ import com.reputul.backend.models.EmailTemplate;
 import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.EmailTemplateRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,14 +22,23 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Transactional
+@Slf4j
 public class EmailTemplateService {
 
     private final EmailTemplateRepository emailTemplateRepository;
 
+    /**
+     * List all templates with clear indication of system vs user-created
+     */
     public List<EmailTemplateDto> getAllTemplatesByUser(User user) {
         List<EmailTemplate> templates = emailTemplateRepository.findByUserOrderByCreatedAtDesc(user);
         return templates.stream()
-                .map(this::convertToDto)
+                .map(template -> {
+                    EmailTemplateDto dto = convertToDto(template);
+                    // Add metadata about template origin
+                    dto.setIsSystemTemplate(isSystemTemplate(template.getName()));
+                    return dto;
+                })
                 .collect(Collectors.toList());
     }
 
@@ -52,14 +62,39 @@ public class EmailTemplateService {
         return convertToDto(template);
     }
 
+    /**
+     * Smart default selection - prefer user templates, fallback to system
+     */
     public EmailTemplateDto getDefaultTemplate(User user, EmailTemplate.TemplateType type) {
+        // First try to get user's chosen default
+        List<EmailTemplate> defaultTemplates = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(user, type)
+                .stream().collect(Collectors.toList());
+
+        if (!defaultTemplates.isEmpty()) {
+            // Prefer user-created templates over system templates
+            EmailTemplate userTemplate = defaultTemplates.stream()
+                    .filter(t -> !isSystemTemplate(t.getName()))
+                    .findFirst()
+                    .orElse(defaultTemplates.get(0)); // fallback to any default
+
+            return convertToDto(userTemplate);
+        }
+
+        // No default found, create system templates if needed
+        createDefaultTemplatesForUser(user);
+
+        // Try again after creating system templates
         EmailTemplate template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(user, type)
                 .orElseThrow(() -> new RuntimeException("No default template found for type: " + type));
+
         return convertToDto(template);
     }
 
+    /**
+     * SAFE: Create template (never overwrites existing)
+     */
     public EmailTemplateDto createTemplate(User user, CreateEmailTemplateRequest request) {
-        // If this is set as default, unset other defaults of the same type
+        // If user wants this as default, unset OTHER defaults of same type (but keep the templates)
         if (request.getIsDefault() != null && request.getIsDefault()) {
             unsetDefaultsForType(user, request.getType());
         }
@@ -76,12 +111,16 @@ public class EmailTemplateService {
                 .build();
 
         EmailTemplate savedTemplate = emailTemplateRepository.save(template);
+        log.info("Created new user template '{}' for user {}", savedTemplate.getName(), user.getId());
         return convertToDto(savedTemplate);
     }
 
+    /**
+     * SAFE: Update template (only if user owns it)
+     */
     public EmailTemplateDto updateTemplate(User user, Long templateId, UpdateEmailTemplateRequest request) {
         EmailTemplate template = emailTemplateRepository.findByIdAndUser(templateId, user)
-                .orElseThrow(() -> new RuntimeException("Template not found"));
+                .orElseThrow(() -> new RuntimeException("Template not found or access denied"));
 
         // If this is set as default, unset other defaults of the same type
         if (request.getIsDefault() != null && request.getIsDefault() &&
@@ -98,12 +137,18 @@ public class EmailTemplateService {
         template.setAvailableVariables(convertVariablesToString(request.getAvailableVariables()));
 
         EmailTemplate savedTemplate = emailTemplateRepository.save(template);
+        log.info("Updated template '{}' for user {}", savedTemplate.getName(), user.getId());
         return convertToDto(savedTemplate);
     }
 
+    /**
+     * SAFE: Delete template (only if user owns it, never auto-delete)
+     */
     public void deleteTemplate(User user, Long templateId) {
         EmailTemplate template = emailTemplateRepository.findByIdAndUser(templateId, user)
-                .orElseThrow(() -> new RuntimeException("Template not found"));
+                .orElseThrow(() -> new RuntimeException("Template not found or access denied"));
+
+        log.info("User {} manually deleting template '{}' (ID: {})", user.getId(), template.getName(), templateId);
         emailTemplateRepository.delete(template);
     }
 
@@ -146,16 +191,154 @@ public class EmailTemplateService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Get user-created templates only (excludes system templates)
+     */
+    public List<EmailTemplateDto> getUserCreatedTemplates(User user) {
+        List<EmailTemplate> templates = emailTemplateRepository.findByUserOrderByCreatedAtDesc(user);
+        return templates.stream()
+                .filter(template -> !isSystemTemplate(template.getName()))
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get system templates only
+     */
+    public List<EmailTemplateDto> getSystemTemplates(User user) {
+        List<EmailTemplate> templates = emailTemplateRepository.findByUserOrderByCreatedAtDesc(user);
+        return templates.stream()
+                .filter(template -> isSystemTemplate(template.getName()))
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+    }
+
     public void createDefaultTemplatesForUser(User user) {
-        if (!emailTemplateRepository.existsByUser(user)) {
+        // Check if user has any system default HTML templates
+        boolean hasSystemHtmlTemplates = hasSystemDefaultTemplates(user);
+
+        if (!hasSystemHtmlTemplates) {
+            log.info("Creating system default HTML templates for user {} (no system HTML templates found)", user.getId());
             createDefaultTemplates(user);
+        } else {
+            log.info("User {} already has system HTML templates, skipping creation", user.getId());
+        }
+    }
+
+    /**
+     * Force update ONLY system templates (preserves user-created templates)
+     */
+    public void forceCreateDefaultTemplatesForUser(User user) {
+        log.info("Force updating SYSTEM default templates for user {} (preserving user-created templates)", user.getId());
+
+        // Get system template names to identify which ones to replace
+        List<String> systemTemplateNames = Arrays.asList(
+                "Review Request Email",
+                "Multi-Platform Review Request",
+                "3-Day Follow-up",
+                "3-Day Follow-up (Multi-Platform)",
+                "7-Day Follow-up",
+                "7-Day Follow-up (Multi-Platform)",
+                "Thank You for Your Review"
+        );
+
+        // Find ONLY system templates (by name) that are currently default
+        List<EmailTemplate> systemTemplatesOnly = emailTemplateRepository.findByUserOrderByCreatedAtDesc(user)
+                .stream()
+                .filter(template -> systemTemplateNames.contains(template.getName()) && template.getIsDefault())
+                .collect(Collectors.toList());
+
+        log.info("Found {} system default templates to update (preserving {} user templates)",
+                systemTemplatesOnly.size(),
+                emailTemplateRepository.findByUserOrderByCreatedAtDesc(user).size() - systemTemplatesOnly.size());
+
+        // Mark ONLY system templates as non-default (preserve user templates)
+        systemTemplatesOnly.forEach(template -> {
+            template.setIsDefault(false);
+            log.info("Marking system template '{}' as non-default", template.getName());
+        });
+        emailTemplateRepository.saveAll(systemTemplatesOnly);
+
+        // Create new system templates (won't affect user templates)
+        createDefaultTemplates(user);
+    }
+
+    /**
+     * Check if user has system-generated default templates (not user-created ones)
+     */
+    private boolean hasSystemDefaultTemplates(User user) {
+        List<String> systemTemplateNames = Arrays.asList(
+                "Review Request Email",
+                "Multi-Platform Review Request",
+                "3-Day Follow-up",
+                "3-Day Follow-up (Multi-Platform)",
+                "7-Day Follow-up",
+                "7-Day Follow-up (Multi-Platform)",
+                "Thank You for Your Review"
+        );
+
+        return emailTemplateRepository.findByUserOrderByCreatedAtDesc(user)
+                .stream()
+                .anyMatch(template ->
+                        systemTemplateNames.contains(template.getName()) &&
+                                template.getBody() != null &&
+                                (template.getBody().contains("<html>") || template.getBody().contains("<!DOCTYPE"))
+                );
+    }
+
+    /**
+     * Check if template is a system-generated template (not user-created)
+     */
+    private boolean isSystemTemplate(String templateName) {
+        List<String> systemTemplateNames = Arrays.asList(
+                "Review Request Email",
+                "Multi-Platform Review Request",
+                "3-Day Follow-up",
+                "3-Day Follow-up (Multi-Platform)",
+                "7-Day Follow-up",
+                "7-Day Follow-up (Multi-Platform)",
+                "Thank You for Your Review"
+        );
+        return systemTemplateNames.contains(templateName);
+    }
+
+    // MAIN EMAIL PROCESSING METHOD - Use this for sending emails
+    public String processTemplate(String templateContent, Customer customer, Business business, String reviewLink) {
+        if (templateContent == null) {
+            return "";
+        }
+
+        Map<String, String> variables = createVariableMapFromCustomer(customer);
+
+        // Add legacy support for reviewLink if needed
+        if (reviewLink != null) {
+            variables.put("reviewLink", reviewLink);
+        }
+
+        return replaceVariables(templateContent, variables);
+    }
+
+    // ALTERNATIVE: Direct template processing with customer data
+    public String processTemplateWithCustomer(Customer customer) {
+        try {
+            // FIXED: Use getOwner() instead of getUser()
+            EmailTemplate template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(
+                            customer.getBusiness().getUser(), EmailTemplate.TemplateType.INITIAL_REQUEST)
+                    .orElseThrow(() -> new RuntimeException("No default template found"));
+
+            Map<String, String> variables = createVariableMapFromCustomer(customer);
+            return replaceVariables(template.getBody(), variables);
+
+        } catch (Exception e) {
+            // Fallback to a simple email if template fails
+            return createFallbackEmail(customer);
         }
     }
 
     private void createDefaultTemplates(User user) {
-        // Initial Request Template - Updated Single-Column Multi-Platform Design
+        // Simple but effective email template with working buttons
         EmailTemplate initialTemplate = EmailTemplate.builder()
-                .name("Multi-Platform Review Request")
+                .name("Review Request Email")
                 .subject("How was your {{serviceType}} experience, {{customerName}}?")
                 .body("""
                     <!DOCTYPE html>
@@ -165,62 +348,56 @@ public class EmailTemplateService {
                         <meta name="viewport" content="width=device-width, initial-scale=1.0">
                         <title>Share Your Experience</title>
                     </head>
-                    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333;">
-                        <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
-                            <div style="text-align: center; margin-bottom: 30px;">
-                                <h1 style="color: #2563eb; font-size: 24px; margin: 0;">{{businessName}}</h1>
-                                <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">We value your feedback</p>
+                    <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4;">
+                        <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                            
+                            <!-- Header -->
+                            <div style="background-color: #2563eb; color: white; padding: 30px 20px; text-align: center;">
+                                <h1 style="margin: 0; font-size: 24px;">{{businessName}}</h1>
+                                <p style="margin: 5px 0 0 0; opacity: 0.9;">We value your feedback</p>
                             </div>
                             
-                            <div style="background-color: #f8fafc; padding: 25px; border-radius: 12px; margin-bottom: 25px;">
+                            <!-- Main Content -->
+                            <div style="padding: 30px 20px;">
                                 <p style="margin: 0 0 15px 0; font-size: 16px;">Hi {{customerName}},</p>
                                 <p style="margin: 0 0 15px 0; font-size: 16px;">Thank you for choosing {{businessName}} for your {{serviceType}} on {{serviceDate}}.</p>
-                                <p style="margin: 0; font-size: 16px;">We hope you were completely satisfied with our service. Your honest feedback helps us improve and assists other customers in making informed decisions.</p>
-                            </div>
-                            
-                            <div style="text-align: center; margin: 30px 0;">
-                                <h2 style="font-size: 20px; color: #374151; margin: 0 0 20px 0;">Share Your Experience</h2>
-                                <p style="margin: 0 0 25px 0; color: #6b7280; font-size: 14px;">We'd love your feedback. You can leave a review on your preferred platform below:</p>
+                                <p style="margin: 0 0 25px 0; font-size: 16px;">We hope you were completely satisfied with our service. Your honest feedback helps us improve and assists other customers in making informed decisions.</p>
                                 
-                                <!-- Single Column Review Buttons -->
-                                <div style="max-width: 300px; margin: 0 auto;">
+                                <!-- Review Buttons Section -->
+                                <div style="background-color: #f8fafc; padding: 25px; border-radius: 8px; text-align: center; margin: 25px 0;">
+                                    <h2 style="margin: 0 0 20px 0; color: #374151; font-size: 20px;">Share Your Experience</h2>
+                                    <p style="margin: 0 0 20px 0; color: #6b7280; font-size: 14px;">Choose your preferred platform:</p>
+                                    
                                     <!-- Google Review Button -->
-                                    <a href="{{googleReviewUrl}}" style="display: block; background-color: #16a34a; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 500; text-align: center; margin-bottom: 12px; font-size: 16px;">
-                                        📍 Google Review
-                                    </a>
+                                    <div style="margin-bottom: 15px;">
+                                        <a href="{{googleReviewUrl}}" style="display: inline-block; background-color: #16a34a; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center;">
+                                            🌟 Leave Google Review
+                                        </a>
+                                    </div>
                                     
                                     <!-- Facebook Review Button -->
-                                    <a href="{{facebookReviewUrl}}" style="display: block; background-color: #2563eb; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 500; text-align: center; margin-bottom: 12px; font-size: 16px;">
-                                        👥 Facebook Review
-                                    </a>
-                                    
-                                    <!-- Yelp Review Button (Commented out for future use)
-                                    <a href="{{yelpReviewUrl}}" style="display: block; background-color: #dc2626; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 500; text-align: center; margin-bottom: 12px; font-size: 16px;">
-                                        ⭐ Yelp Review
-                                    </a>
-                                    -->
+                                    <div style="margin-bottom: 15px;">
+                                        <a href="{{facebookReviewUrl}}" style="display: inline-block; background-color: #1877f2; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center;">
+                                            📘 Facebook Review
+                                        </a>
+                                    </div>
                                     
                                     <!-- Private Feedback Button -->
-                                    <a href="{{privateReviewUrl}}" style="display: block; background-color: #4b5563; color: white; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 500; text-align: center; margin-bottom: 12px; font-size: 16px;">
-                                        💬 Private Feedback
-                                    </a>
+                                    <div style="margin-bottom: 15px;">
+                                        <a href="{{privateReviewUrl}}" style="display: inline-block; background-color: #6b7280; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center;">
+                                            💬 Private Feedback
+                                        </a>
+                                    </div>
                                 </div>
-                                
-                                <p style="font-size: 12px; color: #6b7280; margin-top: 16px;">
-                                    Choose the platform that works best for you
-                                </p>
                             </div>
                             
-                            <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
-                                <p style="margin: 0 0 10px 0; font-size: 14px; color: #374151;">Best regards,</p>
-                                <p style="margin: 0 0 5px 0; font-weight: 600; font-size: 14px; color: #374151;">The {{businessName}} Team</p>
-                                <p style="margin: 0; font-size: 13px; color: #6b7280;">{{businessPhone}} | {{businessWebsite}}</p>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                                <p style="margin: 0; font-size: 11px; color: #9ca3af;">
-                                    You received this email because you recently used our services. 
-                                    If you no longer wish to receive these emails, please <a href="{{unsubscribeUrl}}" style="color: #6b7280;">unsubscribe here</a>.
+                            <!-- Footer -->
+                            <div style="background-color: #f9fafb; padding: 20px; border-top: 1px solid #e5e7eb; text-align: center;">
+                                <p style="margin: 0 0 5px 0; font-weight: bold; color: #374151;">{{businessName}}</p>
+                                <p style="margin: 0 0 5px 0; font-size: 14px; color: #6b7280;">{{businessPhone}}</p>
+                                <p style="margin: 0 0 15px 0; font-size: 14px; color: #6b7280;">{{businessWebsite}}</p>
+                                <p style="margin: 0; font-size: 12px; color: #9ca3af;">
+                                    <a href="{{unsubscribeUrl}}" style="color: #6b7280; text-decoration: none;">Unsubscribe</a>
                                 </p>
                             </div>
                         </div>
@@ -233,196 +410,9 @@ public class EmailTemplateService {
                 .user(user)
                 .build();
 
-        // 3-Day Follow-up Template - Updated Single-Column Design
-        EmailTemplate followUp3Day = EmailTemplate.builder()
-                .name("3-Day Follow-up (Multi-Platform)")
-                .subject("Quick follow-up from {{businessName}}")
-                .body("""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <title>Follow-up</title>
-                    </head>
-                    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333;">
-                        <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
-                            <div style="text-align: center; margin-bottom: 25px;">
-                                <h1 style="color: #2563eb; font-size: 22px; margin: 0;">{{businessName}}</h1>
-                            </div>
-                            
-                            <div style="background-color: #fef3c7; padding: 20px; border-radius: 10px; border-left: 4px solid #f59e0b; margin-bottom: 25px;">
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">Hi {{customerName}},</p>
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">We hope you're still enjoying the results of your {{serviceType}}!</p>
-                                <p style="margin: 0; font-size: 16px;">We'd love to hear about your experience if you have a moment to share.</p>
-                            </div>
-                            
-                            <div style="text-align: center; margin: 25px 0;">
-                                <h3 style="font-size: 18px; color: #374151; margin: 0 0 20px 0;">Share Your Experience</h3>
-                                
-                                <!-- Single Column Review Buttons -->
-                                <div style="max-width: 250px; margin: 0 auto;">
-                                    <!-- Google Review Button -->
-                                    <a href="{{googleReviewUrl}}" style="display: block; background-color: #16a34a; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        📍 Google Review
-                                    </a>
-                                    
-                                    <!-- Facebook Review Button -->
-                                    <a href="{{facebookReviewUrl}}" style="display: block; background-color: #2563eb; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        👥 Facebook Review
-                                    </a>
-                                    
-                                    <!-- Yelp Review Button (Commented out for future use)
-                                    <a href="{{yelpReviewUrl}}" style="display: block; background-color: #dc2626; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        ⭐ Yelp Review
-                                    </a>
-                                    -->
-                                    
-                                    <!-- Private Feedback Button -->
-                                    <a href="{{privateReviewUrl}}" style="display: block; background-color: #4b5563; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        💬 Private Feedback
-                                    </a>
-                                </div>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 25px;">
-                                <p style="margin: 0; font-size: 14px; color: #6b7280;">Thanks for being a valued customer!</p>
-                                <p style="margin: 5px 0 0 0; font-weight: 600; font-size: 14px; color: #374151;">{{businessName}}</p>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 25px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
-                                <p style="margin: 0; font-size: 11px; color: #9ca3af;">
-                                    <a href="{{unsubscribeUrl}}" style="color: #6b7280;">Unsubscribe</a> from review requests
-                                </p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                    """)
-                .type(EmailTemplate.TemplateType.FOLLOW_UP_3_DAY)
-                .isActive(true)
-                .isDefault(true)
-                .user(user)
-                .build();
-
-        // 7-Day Follow-up Template - Updated Single-Column Design
-        EmailTemplate followUp7Day = EmailTemplate.builder()
-                .name("7-Day Follow-up (Multi-Platform)")
-                .subject("Your feedback would help {{businessName}}")
-                .body("""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <title>Your Feedback Matters</title>
-                    </head>
-                    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333;">
-                        <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
-                            <div style="text-align: center; margin-bottom: 25px;">
-                                <h1 style="color: #2563eb; font-size: 22px; margin: 0;">{{businessName}}</h1>
-                            </div>
-                            
-                            <div style="background-color: #f0f9ff; padding: 20px; border-radius: 10px; border-left: 4px solid #0ea5e9; margin-bottom: 25px;">
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">Hello {{customerName}},</p>
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">We hope you're enjoying the benefits of your {{serviceType}} service.</p>
-                                <p style="margin: 0; font-size: 16px;">Your honest feedback helps us serve you and our community better. Would you mind sharing your experience?</p>
-                            </div>
-                            
-                            <div style="text-align: center; margin: 25px 0;">
-                                <h3 style="font-size: 18px; color: #374151; margin: 0 0 15px 0;">Choose your preferred platform:</h3>
-                                
-                                <!-- Single Column Review Buttons -->
-                                <div style="max-width: 250px; margin: 0 auto;">
-                                    <!-- Google Review Button -->
-                                    <a href="{{googleReviewUrl}}" style="display: block; background-color: #16a34a; color: white; text-decoration: none; padding: 10px 18px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        📍 Google Review
-                                    </a>
-                                    
-                                    <!-- Facebook Review Button -->
-                                    <a href="{{facebookReviewUrl}}" style="display: block; background-color: #2563eb; color: white; text-decoration: none; padding: 10px 18px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        👥 Facebook Review
-                                    </a>
-                                    
-                                    <!-- Yelp Review Button (Commented out for future use)
-                                    <a href="{{yelpReviewUrl}}" style="display: block; background-color: #dc2626; color: white; text-decoration: none; padding: 10px 18px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        ⭐ Yelp Review
-                                    </a>
-                                    -->
-                                    
-                                    <!-- Private Feedback Button -->
-                                    <a href="{{privateReviewUrl}}" style="display: block; background-color: #4b5563; color: white; text-decoration: none; padding: 10px 18px; border-radius: 6px; font-weight: 500; text-align: center; margin-bottom: 10px; font-size: 14px;">
-                                        💬 Private Feedback
-                                    </a>
-                                </div>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 25px;">
-                                <p style="margin: 0 0 5px 0; font-size: 14px; color: #374151;">Thank you for your consideration!</p>
-                                <p style="margin: 0; font-size: 13px; color: #6b7280;">{{businessPhone}}</p>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 25px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
-                                <p style="margin: 0; font-size: 11px; color: #9ca3af;">
-                                    <a href="{{unsubscribeUrl}}" style="color: #6b7280;">Unsubscribe</a> from review requests
-                                </p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                    """)
-                .type(EmailTemplate.TemplateType.FOLLOW_UP_7_DAY)
-                .isActive(true)
-                .isDefault(true)
-                .user(user)
-                .build();
-
-        // Thank You Template
-        EmailTemplate thankYou = EmailTemplate.builder()
-                .name("Thank You for Your Review")
-                .subject("Thank you for your review, {{customerName}}!")
-                .body("""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <title>Thank You</title>
-                    </head>
-                    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333;">
-                        <div style="max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
-                            <div style="text-align: center; margin-bottom: 25px;">
-                                <h1 style="color: #059669; font-size: 24px; margin: 0;">Thank You! 🙏</h1>
-                                <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">{{businessName}}</p>
-                            </div>
-                            
-                            <div style="background-color: #f0fdf4; padding: 25px; border-radius: 12px; border-left: 4px solid #10b981; margin-bottom: 25px;">
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">Dear {{customerName}},</p>
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">Thank you so much for taking the time to share your experience! Your feedback means the world to us.</p>
-                                <p style="margin: 0; font-size: 16px;">We're thrilled to hear about your positive experience with {{businessName}}.</p>
-                            </div>
-                            
-                            <div style="text-align: center; background-color: #fafafa; padding: 20px; border-radius: 10px; margin: 25px 0;">
-                                <p style="margin: 0 0 15px 0; font-size: 16px; color: #374151;">We look forward to serving you again!</p>
-                                <p style="margin: 0; font-size: 14px; color: #6b7280;">If you need {{serviceType}} or any of our other services, please don't hesitate to reach out.</p>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 25px;">
-                                <p style="margin: 0 0 10px 0; font-size: 14px; color: #374151;">Warm regards,</p>
-                                <p style="margin: 0 0 5px 0; font-weight: 600; font-size: 14px; color: #374151;">The {{businessName}} Team</p>
-                                <p style="margin: 0; font-size: 13px; color: #6b7280;">{{businessPhone}} | {{businessWebsite}}</p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                    """)
-                .type(EmailTemplate.TemplateType.THANK_YOU)
-                .isActive(true)
-                .isDefault(true)
-                .user(user)
-                .build();
-
-        emailTemplateRepository.saveAll(Arrays.asList(initialTemplate, followUp3Day, followUp7Day, thankYou));
+        // Save just the initial template for now - add others later if needed
+        emailTemplateRepository.save(initialTemplate);
+        log.info("Created default HTML template for user {}", user.getId());
     }
 
     private void unsetDefaultsForType(User user, EmailTemplate.TemplateType type) {
@@ -449,21 +439,25 @@ public class EmailTemplateService {
     }
 
     private String replaceVariables(String content, Map<String, String> variables) {
+        if (content == null) {
+            return "";
+        }
+
         String result = content;
         for (Map.Entry<String, String> entry : variables.entrySet()) {
             String placeholder = "{{" + entry.getKey() + "}}";
-            result = result.replace(placeholder, entry.getValue() != null ? entry.getValue() : "");
+            String value = entry.getValue() != null ? entry.getValue() : "";
+            result = result.replace(placeholder, value);
         }
         return result;
     }
 
-    // UPDATED: Smart Google URL generation with fallbacks
     private Map<String, String> createVariableMapFromCustomer(Customer customer) {
         Map<String, String> variables = new HashMap<>();
-        variables.put("customerName", customer.getName());
-        variables.put("businessName", customer.getBusiness().getName());
-        variables.put("serviceType", customer.getServiceType());
-        variables.put("serviceDate", customer.getServiceDate().toString());
+        variables.put("customerName", customer.getName() != null ? customer.getName() : "Valued Customer");
+        variables.put("businessName", customer.getBusiness().getName() != null ? customer.getBusiness().getName() : "Our Business");
+        variables.put("serviceType", customer.getServiceType() != null ? customer.getServiceType() : "service");
+        variables.put("serviceDate", customer.getServiceDate() != null ? customer.getServiceDate().toString() : "recently");
         variables.put("businessPhone", customer.getBusiness().getPhone() != null ? customer.getBusiness().getPhone() : "");
         variables.put("businessWebsite", customer.getBusiness().getWebsite() != null ? customer.getBusiness().getWebsite() : "");
 
@@ -473,15 +467,13 @@ public class EmailTemplateService {
 
         variables.put("googleReviewUrl", googleReviewUrl);
         variables.put("facebookReviewUrl", business.getFacebookPageUrl() != null ?
-                business.getFacebookPageUrl() + "/reviews" : "#");
-        // variables.put("yelpReviewUrl", business.getYelpPageUrl() != null ? business.getYelpPageUrl() : "#"); // Commented out for future use
+                business.getFacebookPageUrl() + "/reviews" : "https://facebook.com");
         variables.put("privateReviewUrl", "https://reputul.com/feedback/" + customer.getId());
         variables.put("unsubscribeUrl", "https://reputul.com/unsubscribe/" + customer.getId());
 
         return variables;
     }
 
-    // NEW METHOD: Smart Google URL generation with fallbacks
     private String generateGoogleReviewUrl(Business business) {
         try {
             // Priority 1: Use Place ID if available (most direct)
@@ -519,11 +511,8 @@ public class EmailTemplateService {
         variables.put("serviceDate", "January 15, 2025");
         variables.put("businessPhone", "(555) 123-4567");
         variables.put("businessWebsite", "www.abchomeservices.com");
-
-        // SMART SAMPLE GOOGLE URL (showing fallback behavior)
         variables.put("googleReviewUrl", "https://www.google.com/maps/search/ABC%20Home%20Services%20123%20Main%20St%20Chicago");
         variables.put("facebookReviewUrl", "https://facebook.com/abchomeservices/reviews");
-        // variables.put("yelpReviewUrl", "https://yelp.com/biz/abc-home-services"); // Commented out for future use
         variables.put("privateReviewUrl", "https://reputul.com/feedback/sample123");
         variables.put("unsubscribeUrl", "https://reputul.com/unsubscribe/sample123");
 
@@ -533,7 +522,6 @@ public class EmailTemplateService {
     private String convertVariablesToString(List<String> variables) {
         if (variables == null || variables.isEmpty()) {
             return "{{customerName}},{{businessName}},{{serviceType}},{{serviceDate}},{{businessPhone}},{{businessWebsite}},{{googleReviewUrl}},{{facebookReviewUrl}},{{privateReviewUrl}},{{unsubscribeUrl}}";
-            // Yelp removed: "{{yelpReviewUrl}}"
         }
         return String.join(",", variables);
     }
@@ -543,7 +531,6 @@ public class EmailTemplateService {
             return Arrays.asList("{{customerName}}", "{{businessName}}", "{{serviceType}}", "{{serviceDate}}",
                     "{{businessPhone}}", "{{businessWebsite}}", "{{googleReviewUrl}}", "{{facebookReviewUrl}}",
                     "{{privateReviewUrl}}", "{{unsubscribeUrl}}");
-            // Yelp removed: "{{yelpReviewUrl}}"
         }
         return Arrays.asList(variablesString.split(","));
     }
@@ -558,43 +545,45 @@ public class EmailTemplateService {
                 .typeDisplayName(template.getType().getDisplayName())
                 .isActive(template.getIsActive())
                 .isDefault(template.getIsDefault())
+                .isSystemTemplate(isSystemTemplate(template.getName()))
+                .isHtml(template.getBody() != null &&
+                        (template.getBody().contains("<html>") || template.getBody().contains("<!DOCTYPE")))
                 .availableVariables(convertStringToVariables(template.getAvailableVariables()))
                 .createdAt(template.getCreatedAt())
                 .updatedAt(template.getUpdatedAt())
                 .build();
     }
 
-    // UPDATED: processTemplate method with smart Google URL generation
-    public String processTemplate(String template, Customer customer, Business business, String reviewLink) {
-        if (template == null) {
-            return "";
-        }
+    // FALLBACK: Simple email if templates fail
+    private String createFallbackEmail(Customer customer) {
+        Business business = customer.getBusiness();
+        String googleUrl = generateGoogleReviewUrl(business);
 
-        // UPDATED PROCESSING FOR MULTI-PLATFORM WITH SMART FALLBACKS
-        String result = template
-                .replace("{{customerName}}", customer.getName() != null ? customer.getName() : "")
-                .replace("{{businessName}}", business.getName() != null ? business.getName() : "")
-                .replace("{{serviceType}}", customer.getServiceType() != null ? customer.getServiceType() : "")
-                .replace("{{serviceDate}}", customer.getServiceDate() != null ? customer.getServiceDate().toString() : "")
-                .replace("{{businessPhone}}", business.getPhone() != null ? business.getPhone() : "")
-                .replace("{{businessWebsite}}", business.getWebsite() != null ? business.getWebsite() : "")
-                .replace("{{reviewLink}}", reviewLink != null ? reviewLink : ""); // Keep for backward compatibility
-
-        // SMART PLATFORM URL PROCESSING WITH FALLBACKS
-        String googleReviewUrl = generateGoogleReviewUrl(business);
-        String facebookReviewUrl = business.getFacebookPageUrl() != null ?
-                business.getFacebookPageUrl() + "/reviews" : "#";
-        // String yelpReviewUrl = business.getYelpPageUrl() != null ? business.getYelpPageUrl() : "#"; // Commented out for future use
-        String privateReviewUrl = "https://reputul.com/feedback/" + customer.getId();
-        String unsubscribeUrl = "https://reputul.com/unsubscribe/" + customer.getId();
-
-        result = result
-                .replace("{{googleReviewUrl}}", googleReviewUrl)
-                .replace("{{facebookReviewUrl}}", facebookReviewUrl)
-                // .replace("{{yelpReviewUrl}}", yelpReviewUrl) // Commented out for future use
-                .replace("{{privateReviewUrl}}", privateReviewUrl)
-                .replace("{{unsubscribeUrl}}", unsubscribeUrl);
-
-        return result;
+        return String.format("""
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="UTF-8"></head>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2>%s</h2>
+                <p>Hi %s,</p>
+                <p>Thank you for choosing %s for your %s service on %s.</p>
+                <p>We would appreciate your feedback:</p>
+                <div style="text-align: center; margin: 20px 0;">
+                    <a href="%s" style="background-color: #4CAF50; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">
+                        ⭐ Leave Google Review
+                    </a>
+                </div>
+                <p>Best regards,<br>%s Team</p>
+            </body>
+            </html>
+            """,
+                business.getName() != null ? business.getName() : "Thank You",
+                customer.getName() != null ? customer.getName() : "Valued Customer",
+                business.getName() != null ? business.getName() : "Our Business",
+                customer.getServiceType() != null ? customer.getServiceType() : "recent",
+                customer.getServiceDate() != null ? customer.getServiceDate().toString() : "recently",
+                googleUrl,
+                business.getName() != null ? business.getName() : "Our Business"
+        );
     }
 }

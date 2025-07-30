@@ -7,7 +7,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -27,7 +26,7 @@ public class BusinessService {
      * Get business by ID for a specific user (security check)
      */
     public Business getBusinessById(Long businessId, User user) {
-        return businessRepo.findByIdAndOwner(businessId, user)
+        return businessRepo.findByIdAndUser(businessId, user)
                 .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
     }
 
@@ -57,7 +56,7 @@ public class BusinessService {
      * Get all businesses for a user
      */
     public List<Business> getBusinessesByUser(User user) {
-        return businessRepo.findByOwner(user);
+        return businessRepo.findByUser(user);
     }
 
     /**
@@ -109,20 +108,20 @@ public class BusinessService {
      * Check if business exists and belongs to user
      */
     public boolean existsByIdAndUser(Long businessId, User user) {
-        return businessRepo.existsByIdAndOwner(businessId, user);
+        return businessRepo.existsByIdAndUser(businessId, user);
     }
 
     /**
      * Get businesses that need platform setup
      */
     public List<Business> getBusinessesNeedingPlatformSetup(User user) {
-        return businessRepo.findByOwnerAndReviewPlatformsConfigured(user, false);
+        return businessRepo.findByUserAndReviewPlatformsConfigured(user, false);
     }
 
     /**
      * Count businesses needing platform setup
      */
     public long countBusinessesNeedingPlatformSetup(User user) {
-        return businessRepo.countByOwnerAndReviewPlatformsConfigured(user, false);
+        return businessRepo.countByUserAndReviewPlatformsConfigured(user, false);
     }
 }

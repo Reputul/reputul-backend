@@ -48,6 +48,18 @@ public class Customer {
     @Column(columnDefinition = "TEXT")
     private String notes;
 
+    // NEW: Feedback tracking fields
+    @Column(name = "last_feedback_date")
+    private LocalDateTime lastFeedbackDate;
+
+    @Column(name = "feedback_count")
+    @Builder.Default
+    private Integer feedbackCount = 0;
+
+    @Column(name = "feedback_submitted")
+    @Builder.Default
+    private Boolean feedbackSubmitted = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "business_id", nullable = false)
     private Business business;
@@ -65,6 +77,12 @@ public class Customer {
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+        if (feedbackCount == null) {
+            feedbackCount = 0;
+        }
+        if (feedbackSubmitted == null) {
+            feedbackSubmitted = false;
+        }
     }
 
     @PreUpdate

@@ -33,7 +33,7 @@ public class CustomerService {
     }
 
     public List<CustomerDto> getCustomersByBusiness(User user, Long businessId) {
-        Business business = businessRepository.findByIdAndOwnerId(businessId, user.getId())
+        Business business = businessRepository.findByIdAndUserId(businessId, user.getId())
                 .orElseThrow(() -> new RuntimeException("Business not found"));
 
         List<Customer> customers = customerRepository.findByUserAndBusinessOrderByCreatedAtDesc(user, business);
@@ -50,7 +50,7 @@ public class CustomerService {
         }
 
         // Verify business belongs to user
-        Business business = businessRepository.findByIdAndOwnerId(request.getBusinessId(), user.getId())
+        Business business = businessRepository.findByIdAndUserId(request.getBusinessId(), user.getId())
                 .orElseThrow(() -> new RuntimeException("Business not found"));
 
         Customer customer = Customer.builder()
@@ -83,7 +83,7 @@ public class CustomerService {
 
         // Verify business belongs to user if business is being changed
         if (request.getBusinessId() != null && !request.getBusinessId().equals(customer.getBusiness().getId())) {
-            Business business = businessRepository.findByIdAndOwnerId(request.getBusinessId(), user.getId())
+            Business business = businessRepository.findByIdAndUserId(request.getBusinessId(), user.getId())
                     .orElseThrow(() -> new RuntimeException("Business not found"));
             customer.setBusiness(business);
         }

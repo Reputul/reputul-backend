@@ -16,20 +16,14 @@ public class Business {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private String name;
     private String industry;
     private String phone;
     private String website;
     private String address;
-
     private Double reputationScore;
-
     private String badge;
-
     private LocalDateTime createdAt;
-
-    // NEW: Review Platform Integration Fields
     private String googlePlaceId;
     private String facebookPageUrl;
     private String yelpPageUrl;
@@ -39,7 +33,7 @@ public class Business {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
-    private User owner;
+    private User user;
 
     @OneToMany(mappedBy = "business", cascade = CascadeType.ALL)
     @JsonIgnore
