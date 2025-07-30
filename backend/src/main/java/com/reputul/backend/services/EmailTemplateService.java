@@ -231,7 +231,7 @@ public class EmailTemplateService {
     public void forceCreateDefaultTemplatesForUser(User user) {
         log.info("Force updating SYSTEM default templates for user {} (preserving user-created templates)", user.getId());
 
-        // Get system template names to identify which ones to replace
+        // UPDATED: Get system template names to identify which ones to replace
         List<String> systemTemplateNames = Arrays.asList(
                 "Review Request Email",
                 "Multi-Platform Review Request",
@@ -335,84 +335,89 @@ public class EmailTemplateService {
         }
     }
 
+    // UPDATED: Create default templates with official Google and Facebook branding
     private void createDefaultTemplates(User user) {
-        // Simple but effective email template with working buttons
+        // Professional email template with official Google and Facebook logos (email-friendly)
         EmailTemplate initialTemplate = EmailTemplate.builder()
-                .name("Review Request Email")
+                .name("Review Request Email")  // FIXED: Keep original name
                 .subject("How was your {{serviceType}} experience, {{customerName}}?")
                 .body("""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <title>Share Your Experience</title>
-                    </head>
-                    <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4;">
-                        <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Share Your Experience</title>
+                </head>
+                <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4;">
+                    <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                        
+                        <!-- Header -->
+                        <div style="background-color: #2563eb; color: white; padding: 30px 20px; text-align: center;">
+                            <h1 style="margin: 0; font-size: 24px;">{{businessName}}</h1>
+                            <p style="margin: 5px 0 0 0; opacity: 0.9;">We value your feedback</p>
+                        </div>
+                        
+                        <!-- Main Content -->
+                        <div style="padding: 30px 20px;">
+                            <p style="margin: 0 0 15px 0; font-size: 16px;">Hi {{customerName}},</p>
+                            <p style="margin: 0 0 15px 0; font-size: 16px;">Thank you for choosing {{businessName}} for your {{serviceType}} on {{serviceDate}}.</p>
+                            <p style="margin: 0 0 25px 0; font-size: 16px;">We hope you were completely satisfied with our service. Your honest feedback helps us improve and assists other customers in making informed decisions.</p>
                             
-                            <!-- Header -->
-                            <div style="background-color: #2563eb; color: white; padding: 30px 20px; text-align: center;">
-                                <h1 style="margin: 0; font-size: 24px;">{{businessName}}</h1>
-                                <p style="margin: 5px 0 0 0; opacity: 0.9;">We value your feedback</p>
-                            </div>
-                            
-                            <!-- Main Content -->
-                            <div style="padding: 30px 20px;">
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">Hi {{customerName}},</p>
-                                <p style="margin: 0 0 15px 0; font-size: 16px;">Thank you for choosing {{businessName}} for your {{serviceType}} on {{serviceDate}}.</p>
-                                <p style="margin: 0 0 25px 0; font-size: 16px;">We hope you were completely satisfied with our service. Your honest feedback helps us improve and assists other customers in making informed decisions.</p>
+                            <!-- Review Buttons Section -->
+                            <div style="background-color: #f8fafc; padding: 25px; border-radius: 8px; text-align: center; margin: 25px 0;">
+                                <h2 style="margin: 0 0 20px 0; color: #374151; font-size: 20px;">Share Your Experience</h2>
+                                <p style="margin: 0 0 20px 0; color: #6b7280; font-size: 14px;">Choose your preferred platform:</p>
                                 
-                                <!-- Review Buttons Section -->
-                                <div style="background-color: #f8fafc; padding: 25px; border-radius: 8px; text-align: center; margin: 25px 0;">
-                                    <h2 style="margin: 0 0 20px 0; color: #374151; font-size: 20px;">Share Your Experience</h2>
-                                    <p style="margin: 0 0 20px 0; color: #6b7280; font-size: 14px;">Choose your preferred platform:</p>
-                                    
-                                    <!-- Google Review Button -->
-                                    <div style="margin-bottom: 15px;">
-                                        <a href="{{googleReviewUrl}}" style="display: inline-block; background-color: #16a34a; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center;">
-                                            🌟 Leave Google Review
-                                        </a>
-                                    </div>
-                                    
-                                    <!-- Facebook Review Button -->
-                                    <div style="margin-bottom: 15px;">
-                                        <a href="{{facebookReviewUrl}}" style="display: inline-block; background-color: #1877f2; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center;">
-                                            📘 Facebook Review
-                                        </a>
-                                    </div>
-                                    
-                                    <!-- Private Feedback Button -->
-                                    <div style="margin-bottom: 15px;">
-                                        <a href="{{privateReviewUrl}}" style="display: inline-block; background-color: #6b7280; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center;">
-                                            💬 Private Feedback
-                                        </a>
-                                    </div>
+                                <!-- Google Review Button with Official Branding -->
+                                <div style="margin-bottom: 15px;">
+                                    <a href="{{googleReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #374151; text-decoration: none; padding: 15px 25px; border-radius: 8px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center; border: 2px solid #e5e7eb; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                        <span style="color: #4285F4; font-weight: bold; font-size: 18px; margin-right: 8px;">G</span>Review on Google
+                                    </a>
+                                </div>
+                                
+                                <!-- Facebook Review Button with Official Branding -->
+                                <div style="margin-bottom: 15px;">
+                                    <a href="{{facebookReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #374151; text-decoration: none; padding: 15px 25px; border-radius: 8px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center; border: 2px solid #e5e7eb; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                        <span style="color: #1877F2; font-weight: bold; font-size: 18px; margin-right: 8px;">f</span>Review on Facebook
+                                    </a>
+                                </div>
+                                
+                                <!-- Private Feedback Button -->
+                                <div style="margin-bottom: 15px;">
+                                    <a href="{{privateReviewUrl}}" style="display: inline-block; background-color: #6b7280; color: white; text-decoration: none; padding: 15px 25px; border-radius: 8px; font-weight: bold; font-size: 16px; min-width: 200px; text-align: center;">
+                                        💬 Private Feedback
+                                    </a>
                                 </div>
                             </div>
                             
-                            <!-- Footer -->
-                            <div style="background-color: #f9fafb; padding: 20px; border-top: 1px solid #e5e7eb; text-align: center;">
-                                <p style="margin: 0 0 5px 0; font-weight: bold; color: #374151;">{{businessName}}</p>
-                                <p style="margin: 0 0 5px 0; font-size: 14px; color: #6b7280;">{{businessPhone}}</p>
-                                <p style="margin: 0 0 15px 0; font-size: 14px; color: #6b7280;">{{businessWebsite}}</p>
-                                <p style="margin: 0; font-size: 12px; color: #9ca3af;">
-                                    <a href="{{unsubscribeUrl}}" style="color: #6b7280; text-decoration: none;">Unsubscribe</a>
-                                </p>
-                            </div>
+                            <p style="margin: 20px 0 0 0; color: #6b7280; font-size: 14px; text-align: center;">
+                                Your feedback is important to us and helps us serve you better.
+                            </p>
                         </div>
-                    </body>
-                    </html>
-                    """)
+                        
+                        <!-- Footer -->
+                        <div style="background-color: #f9fafb; padding: 20px; border-top: 1px solid #e5e7eb; text-align: center;">
+                            <p style="margin: 0 0 5px 0; font-weight: bold; color: #374151;">{{businessName}}</p>
+                            <p style="margin: 0 0 5px 0; font-size: 14px; color: #6b7280;">{{businessPhone}}</p>
+                            <p style="margin: 0 0 15px 0; font-size: 14px; color: #6b7280;">{{businessWebsite}}</p>
+                            <p style="margin: 0; font-size: 12px; color: #9ca3af;">
+                                <a href="{{unsubscribeUrl}}" style="color: #6b7280; text-decoration: none;">Unsubscribe</a>
+                            </p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """)
                 .type(EmailTemplate.TemplateType.INITIAL_REQUEST)
                 .isActive(true)
                 .isDefault(true)
                 .user(user)
                 .build();
 
-        // Save just the initial template for now - add others later if needed
+        // Save the template
         emailTemplateRepository.save(initialTemplate);
-        log.info("Created default HTML template for user {}", user.getId());
+        log.info("Created default HTML template with official Google and Facebook branding for user {}", user.getId());
     }
 
     private void unsetDefaultsForType(User user, EmailTemplate.TemplateType type) {
@@ -574,8 +579,8 @@ public class EmailTemplateService {
                 <p>Thank you for choosing %s for your %s service on %s.</p>
                 <p>We would appreciate your feedback:</p>
                 <div style="text-align: center; margin: 20px 0;">
-                    <a href="%s" style="background-color: #4CAF50; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">
-                        ⭐ Leave Google Review
+                    <a href="%s" style="background-color: #ffffff; color: #374151; padding: 15px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px; border: 2px solid #e5e7eb;">
+                        <span style="color: #4285F4; font-weight: bold; margin-right: 8px;">G</span>Review on Google
                     </a>
                 </div>
                 <p>Best regards,<br>%s Team</p>

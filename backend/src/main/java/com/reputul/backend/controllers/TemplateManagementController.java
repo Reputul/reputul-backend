@@ -288,4 +288,20 @@ public class TemplateManagementController {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
+
+    @PostMapping("/update-branding")
+    public ResponseEntity<Map<String, String>> updateTemplateBranding(@AuthenticationPrincipal User user) {
+        try {
+            emailTemplateService.forceCreateDefaultTemplatesForUser(user);
+            return ResponseEntity.ok(Map.of(
+                    "success", "true",
+                    "message", "Templates updated with official Google and Facebook branding!"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of(
+                    "success", "false",
+                    "message", "Error: " + e.getMessage()
+            ));
+        }
+    }
 }

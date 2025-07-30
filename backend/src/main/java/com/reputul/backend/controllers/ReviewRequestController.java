@@ -28,15 +28,35 @@ public class ReviewRequestController {
     private final EmailTemplateRepository emailTemplateRepository;
 
     @PostMapping("")
-    public ResponseEntity<ReviewRequestDto> sendReviewRequest(
-            @RequestBody SendReviewRequestDto request,
+    public ResponseEntity<?> sendReviewRequest(
+            @RequestBody Map<String, Object> request,
             Authentication authentication) {
         try {
             User user = getCurrentUser(authentication);
-            ReviewRequestDto result = reviewRequestService.sendReviewRequestWithDefaultTemplate(user, request.getCustomerId());
-            return ResponseEntity.ok(result);
-        } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().build();
+
+            // Extract data from request
+            Long customerId = Long.valueOf(request.get("customerId").toString());
+
+            System.out.println("🚀 Sending review request to customer ID: " + customerId);
+
+            // Use the existing service method (ignores templateId for now)
+            ReviewRequestDto result = reviewRequestService.sendReviewRequestWithDefaultTemplate(user, customerId);
+
+            // Return success response
+            return ResponseEntity.ok(Map.of(
+                    "status", "SENT",
+                    "message", "Review request sent successfully!",
+                    "customerEmail", result.getCustomerEmail() != null ? result.getCustomerEmail() : "N/A"
+            ));
+
+        } catch (Exception e) {
+            System.err.println("❌ Error sending review request: " + e.getMessage());
+            e.printStackTrace();
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "FAILED",
+                    "errorMessage", e.getMessage()
+            ));
         }
     }
 
