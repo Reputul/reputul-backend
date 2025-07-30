@@ -321,7 +321,7 @@ public class EmailTemplateService {
     // ALTERNATIVE: Direct template processing with customer data
     public String processTemplateWithCustomer(Customer customer) {
         try {
-            // FIXED: Use getOwner() instead of getUser()
+            // FIXED: Use getUser() since you renamed owner -> user
             EmailTemplate template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(
                             customer.getBusiness().getUser(), EmailTemplate.TemplateType.INITIAL_REQUEST)
                     .orElseThrow(() -> new RuntimeException("No default template found"));
@@ -468,8 +468,13 @@ public class EmailTemplateService {
         variables.put("googleReviewUrl", googleReviewUrl);
         variables.put("facebookReviewUrl", business.getFacebookPageUrl() != null ?
                 business.getFacebookPageUrl() + "/reviews" : "https://facebook.com");
-        variables.put("privateReviewUrl", "https://reputul.com/feedback/" + customer.getId());
-        variables.put("unsubscribeUrl", "https://reputul.com/unsubscribe/" + customer.getId());
+
+        // FIXED: Match your existing React route with DEBUG LOGGING
+        String privateReviewUrl = "http://localhost:3000/feedback/" + customer.getId();
+        log.info("🔗 Generated private review URL: {} for customer ID: {}", privateReviewUrl, customer.getId());
+
+        variables.put("privateReviewUrl", privateReviewUrl);
+        variables.put("unsubscribeUrl", "http://localhost:3000/unsubscribe/" + customer.getId());
 
         return variables;
     }

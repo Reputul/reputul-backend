@@ -12,11 +12,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/customers")
-@CrossOrigin(origins = "*") // Allow all origins for public feedback
+// REMOVED: @CrossOrigin(origins = "*") - Let global WebConfig handle CORS
 public class CustomerFeedbackController {
 
     private final CustomerRepository customerRepository;
@@ -161,6 +162,49 @@ public class CustomerFeedbackController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error submitting feedback: " + e.getMessage());
+        }
+    }
+
+    // Add this method to your CustomerFeedbackController.java:
+
+    /**
+     * Test endpoint to verify customer exists and data is accessible
+     */
+    @GetMapping("/{customerId}/test")
+    public ResponseEntity<?> testCustomerAccess(@PathVariable Long customerId) {
+        try {
+            Optional<Customer> customerOpt = customerRepository.findById(customerId);
+
+            if (customerOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of(
+                                "found", false,
+                                "customerId", customerId,
+                                "message", "Customer not found"
+                        ));
+            }
+
+            Customer customer = customerOpt.get();
+            Business business = customer.getBusiness();
+
+            return ResponseEntity.ok(Map.of(
+                    "found", true,
+                    "customerId", customer.getId(),
+                    "customerName", customer.getName(),
+                    "businessName", business != null ? business.getName() : "No business",
+                    "serviceType", customer.getServiceType(),
+                    "email", customer.getEmail(),
+                    "correctFeedbackUrl", "http://localhost:3000/feedback/" + customer.getId(),
+                    "backendEndpoint", "http://localhost:8080/api/customers/" + customer.getId() + "/feedback-info"
+            ));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of(
+                            "found", false,
+                            "error", e.getMessage(),
+                            "customerId", customerId
+                    ));
         }
     }
 
