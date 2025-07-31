@@ -4,15 +4,20 @@ import com.reputul.backend.dto.*;
 import com.reputul.backend.models.EmailTemplate;
 import com.reputul.backend.models.ReviewRequest;
 import com.reputul.backend.models.User;
+import com.reputul.backend.models.Customer;
 import com.reputul.backend.repositories.EmailTemplateRepository;
 import com.reputul.backend.repositories.UserRepository;
+import com.reputul.backend.repositories.CustomerRepository;
 import com.reputul.backend.services.ReviewRequestService;
 import com.reputul.backend.services.EmailService;
+import com.reputul.backend.services.SmsService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -20,12 +25,15 @@ import java.util.Map;
 @RequestMapping("/api/review-requests")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "http://localhost:3000")
+@Slf4j
 public class ReviewRequestController {
 
     private final ReviewRequestService reviewRequestService;
     private final EmailService emailService;
+    private final SmsService smsService;
     private final UserRepository userRepository;
     private final EmailTemplateRepository emailTemplateRepository;
+    private final CustomerRepository customerRepository;
 
     @PostMapping("")
     public ResponseEntity<?> sendReviewRequest(
@@ -36,21 +44,56 @@ public class ReviewRequestController {
 
             // Extract data from request
             Long customerId = Long.valueOf(request.get("customerId").toString());
+            String deliveryMethod = request.getOrDefault("deliveryMethod", "EMAIL").toString().toUpperCase();
 
-            System.out.println("🚀 Sending review request to customer ID: " + customerId);
+            log.info("🚀 Sending {} review request to customer ID: {}", deliveryMethod, customerId);
 
-            // Use the existing service method (ignores templateId for now)
-            ReviewRequestDto result = reviewRequestService.sendReviewRequestWithDefaultTemplate(user, customerId);
+            // Validate customer and get customer details for phone validation
+            Customer customer = customerRepository.findById(customerId)
+                    .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+            if (!customer.getBusiness().getUser().getId().equals(user.getId())) {
+                throw new RuntimeException("Access denied: Customer does not belong to your business");
+            }
+
+            // Validate delivery method requirements
+            if ("SMS".equals(deliveryMethod)) {
+                if (customer.getPhone() == null || customer.getPhone().trim().isEmpty()) {
+                    return ResponseEntity.ok(Map.of(
+                            "status", "FAILED",
+                            "errorMessage", "Customer phone number is required for SMS delivery"
+                    ));
+                }
+
+                if (!smsService.isValidPhoneNumber(customer.getPhone())) {
+                    return ResponseEntity.ok(Map.of(
+                            "status", "FAILED",
+                            "errorMessage", "Invalid phone number format"
+                    ));
+                }
+            }
+
+            ReviewRequestDto result;
+
+            // Send based on delivery method
+            if ("SMS".equals(deliveryMethod)) {
+                result = reviewRequestService.sendSmsReviewRequest(user, customerId);
+            } else {
+                // Default to email
+                result = reviewRequestService.sendReviewRequestWithDefaultTemplate(user, customerId);
+            }
 
             // Return success response
             return ResponseEntity.ok(Map.of(
                     "status", "SENT",
-                    "message", "Review request sent successfully!",
-                    "customerEmail", result.getCustomerEmail() != null ? result.getCustomerEmail() : "N/A"
+                    "deliveryMethod", deliveryMethod,
+                    "message", deliveryMethod + " review request sent successfully!",
+                    "recipient", "SMS".equals(deliveryMethod) ?
+                            customer.getPhone() : customer.getEmail()
             ));
 
         } catch (Exception e) {
-            System.err.println("❌ Error sending review request: " + e.getMessage());
+            log.error("❌ Error sending review request: {}", e.getMessage());
             e.printStackTrace();
 
             return ResponseEntity.ok(Map.of(
@@ -115,6 +158,41 @@ public class ReviewRequestController {
         }
     }
 
+    // NEW: Test SMS functionality
+    @PostMapping("/test-sms")
+    public ResponseEntity<Map<String, Object>> sendTestSms(
+            @RequestBody Map<String, String> testRequest,
+            Authentication authentication) {
+        try {
+            User user = getCurrentUser(authentication);
+            String phoneNumber = testRequest.get("phone");
+            String message = testRequest.getOrDefault("message",
+                    "Test SMS from Reputul - Your SMS service is working correctly!");
+
+            if (!smsService.isValidPhoneNumber(phoneNumber)) {
+                return ResponseEntity.ok(Map.of(
+                        "success", false,
+                        "message", "Invalid phone number format"
+                ));
+            }
+
+            SmsService.SmsResult result = smsService.sendTestSms(phoneNumber, message);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", result.isSuccess(),
+                    "message", result.isSuccess() ?
+                            "Test SMS sent successfully!" : result.getErrorMessage(),
+                    "messageSid", result.getMessageSid() != null ? result.getMessageSid() : "",
+                    "status", result.getStatus() != null ? result.getStatus() : ""
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "message", "Error: " + e.getMessage()
+            ));
+        }
+    }
+
     @PostMapping("/test")
     public ResponseEntity<Map<String, Object>> sendTestEmail(
             @RequestBody Map<String, String> testRequest,
@@ -154,19 +232,46 @@ public class ReviewRequestController {
         long clicked = allRequests.stream().filter(r -> r.getClickedAt() != null).count();
         long completed = allRequests.stream().filter(r -> r.getStatus() == ReviewRequest.RequestStatus.COMPLETED).count();
 
-        Map<String, Object> stats = Map.of(
-                "totalRequests", allRequests.size(),
-                "totalSent", totalSent,
-                "successfulSends", successful,
-                "opened", opened,
-                "clicked", clicked,
-                "completed", completed,
-                "openRate", totalSent > 0 ? Math.round((double) opened / totalSent * 100.0) : 0,
-                "clickRate", totalSent > 0 ? Math.round((double) clicked / totalSent * 100.0) : 0,
-                "completionRate", totalSent > 0 ? Math.round((double) completed / totalSent * 100.0) : 0
-        );
+        // NEW: SMS-specific stats
+        long smsRequests = allRequests.stream().filter(r ->
+                r.getDeliveryMethod() != null && "SMS".equals(r.getDeliveryMethod())).count();
+        long emailRequests = allRequests.size() - smsRequests;
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("totalRequests", allRequests.size());
+        stats.put("totalSent", totalSent);
+        stats.put("successfulSends", successful);
+        stats.put("opened", opened);
+        stats.put("clicked", clicked);
+        stats.put("completed", completed);
+        stats.put("smsRequests", smsRequests);
+        stats.put("emailRequests", emailRequests);
+        stats.put("openRate", totalSent > 0 ? Math.round((double) opened / totalSent * 100.0) : 0);
+        stats.put("clickRate", totalSent > 0 ? Math.round((double) clicked / totalSent * 100.0) : 0);
+        stats.put("completionRate", totalSent > 0 ? Math.round((double) completed / totalSent * 100.0) : 0);
 
         return ResponseEntity.ok(stats);
+    }
+
+    // NEW: Validate phone number endpoint
+    @PostMapping("/validate-phone")
+    public ResponseEntity<Map<String, Object>> validatePhoneNumber(
+            @RequestBody Map<String, String> request) {
+        try {
+            String phoneNumber = request.get("phone");
+            boolean isValid = smsService.isValidPhoneNumber(phoneNumber);
+
+            return ResponseEntity.ok(Map.of(
+                    "valid", isValid,
+                    "message", isValid ? "Valid phone number" : "Invalid phone number format",
+                    "originalNumber", phoneNumber != null ? phoneNumber : ""
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of(
+                    "valid", false,
+                    "message", "Error validating phone number: " + e.getMessage()
+            ));
+        }
     }
 
     private User getCurrentUser(Authentication authentication) {
@@ -175,8 +280,7 @@ public class ReviewRequestController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
 
-    // Add this method to your existing ReviewRequestController class
-
+    // Keep existing template fix method for backward compatibility
     @PostMapping("/fix-template")
     public ResponseEntity<Map<String, Object>> fixTemplate(Authentication authentication) {
         try {

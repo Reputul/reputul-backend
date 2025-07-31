@@ -88,6 +88,33 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-thymeleaf</artifactId>
 		</dependency>
+		<!-- Add these dependencies to your existing pom.xml file -->
+
+		<!-- Twilio SDK for SMS functionality -->
+		<dependency>
+			<groupId>com.twilio.sdk</groupId>
+			<artifactId>twilio</artifactId>
+			<version>10.0.0</version>
+		</dependency>
+
+		<!-- Google libphonenumber for enhanced phone validation (optional but recommended) -->
+		<dependency>
+			<groupId>com.googlecode.libphonenumber</groupId>
+			<artifactId>libphonenumber</artifactId>
+			<version>8.13.27</version>
+		</dependency>
+
+		<!-- For JSON processing if not already included -->
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+		</dependency>
+
+		<!-- For URL encoding and HTTP utilities if not already included -->
+		<dependency>
+			<groupId>org.springframework</groupId>
+			<artifactId>spring-web</artifactId>
+		</dependency>
 
 
 

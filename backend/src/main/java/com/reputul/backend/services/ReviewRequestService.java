@@ -27,6 +27,8 @@ public class ReviewRequestService {
     private final EmailTemplateRepository emailTemplateRepository;
     private final EmailService emailService;
     private final EmailTemplateService emailTemplateService;
+    private final SmsService smsService;
+    private final SmsTemplateService smsTemplateService;
 
     @Transactional
     public ReviewRequestDto sendReviewRequest(User user, SendReviewRequestDto request) {
@@ -58,6 +60,7 @@ public class ReviewRequestService {
                 .customer(customer)
                 .business(business)
                 .emailTemplate(template)
+                .deliveryMethod(ReviewRequest.DeliveryMethod.EMAIL) // Default to email
                 .recipientEmail(customer.getEmail())
                 .subject(processedSubject)
                 .emailBody(processedBody)
@@ -86,11 +89,91 @@ public class ReviewRequestService {
     }
 
     /**
-     * NEW: Send review request with default template (recommended for new integrations)
+     * NEW: Send SMS review request
+     */
+    @Transactional
+    public ReviewRequestDto sendSmsReviewRequest(User user, Long customerId) {
+        log.info("Sending SMS review request to customer {}", customerId);
+
+        // Validate customer belongs to user's business
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        if (!customer.getBusiness().getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Access denied: Customer does not belong to your business");
+        }
+
+        // Validate phone number
+        if (customer.getPhone() == null || customer.getPhone().trim().isEmpty()) {
+            throw new RuntimeException("Customer phone number is required for SMS delivery");
+        }
+
+        if (!smsService.isValidPhoneNumber(customer.getPhone())) {
+            throw new RuntimeException("Invalid phone number format");
+        }
+
+        Business business = customer.getBusiness();
+
+        // Get default email template (we'll adapt it for SMS)
+        EmailTemplate template;
+        try {
+            template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(user, EmailTemplate.TemplateType.INITIAL_REQUEST)
+                    .orElseThrow(() -> new RuntimeException("No default template found"));
+        } catch (Exception e) {
+            log.warn("No default template found, creating default templates for user {}", user.getId());
+            emailTemplateService.createDefaultTemplatesForUser(user);
+            template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(user, EmailTemplate.TemplateType.INITIAL_REQUEST)
+                    .orElseThrow(() -> new RuntimeException("Failed to create default template"));
+        }
+
+        // Generate SMS message using SMS template service
+        String smsMessage = smsTemplateService.generateReviewRequestMessage(customer);
+        String reviewLink = "http://localhost:3000/feedback/" + customer.getId();
+
+        // Create SMS review request record
+        ReviewRequest reviewRequest = ReviewRequest.builder()
+                .customer(customer)
+                .business(business)
+                .emailTemplate(template) // Reference for tracking, but SMS uses own content
+                .deliveryMethod(ReviewRequest.DeliveryMethod.SMS)
+                .recipientEmail(customer.getEmail()) // Keep for reference
+                .recipientPhone(customer.getPhone())
+                .subject("SMS Review Request") // SMS doesn't have subject
+                .smsMessage(smsMessage)
+                .reviewLink(reviewLink)
+                .status(ReviewRequest.RequestStatus.PENDING)
+                .build();
+
+        reviewRequest = reviewRequestRepository.save(reviewRequest);
+
+        // Send SMS
+        SmsService.SmsResult smsResult = smsService.sendReviewRequestSms(customer);
+
+        // Update status based on SMS send result
+        if (smsResult.isSuccess()) {
+            reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
+            reviewRequest.setSentAt(LocalDateTime.now());
+            reviewRequest.setSmsMessageId(smsResult.getMessageSid());
+            reviewRequest.setSmsStatus(smsResult.getStatus());
+            log.info("✅ SMS review request sent successfully to {} - SID: {}",
+                    customer.getPhone(), smsResult.getMessageSid());
+        } else {
+            reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
+            reviewRequest.setErrorMessage("Failed to send SMS: " + smsResult.getErrorMessage());
+            log.error("❌ Failed to send SMS review request to {}: {}",
+                    customer.getPhone(), smsResult.getErrorMessage());
+        }
+
+        reviewRequest = reviewRequestRepository.save(reviewRequest);
+        return convertToDto(reviewRequest);
+    }
+
+    /**
+     * Send review request with default template (EMAIL - existing method)
      */
     @Transactional
     public ReviewRequestDto sendReviewRequestWithDefaultTemplate(User user, Long customerId) {
-        log.info("Sending review request with default template for customer {}", customerId);
+        log.info("Sending email review request with default template for customer {}", customerId);
 
         // Validate customer belongs to user's business
         Customer customer = customerRepository.findById(customerId)
@@ -124,6 +207,7 @@ public class ReviewRequestService {
                 .customer(customer)
                 .business(business)
                 .emailTemplate(template)
+                .deliveryMethod(ReviewRequest.DeliveryMethod.EMAIL)
                 .recipientEmail(customer.getEmail())
                 .subject(processedSubject)
                 .emailBody(processedBody)
@@ -140,7 +224,7 @@ public class ReviewRequestService {
         if (emailSent) {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
             reviewRequest.setSentAt(LocalDateTime.now());
-            log.info("✅ Default template review request sent successfully to {}", customer.getEmail());
+            log.info("✅ Default template email review request sent successfully to {}", customer.getEmail());
         } else {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
             reviewRequest.setErrorMessage("Failed to send email with default template");
@@ -179,6 +263,7 @@ public class ReviewRequestService {
                 .customer(customer)
                 .business(business)
                 .emailTemplate(template)
+                .deliveryMethod(ReviewRequest.DeliveryMethod.EMAIL)
                 .recipientEmail(customer.getEmail())
                 .subject(processedSubject)
                 .emailBody(processedBody)
@@ -200,6 +285,69 @@ public class ReviewRequestService {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
             reviewRequest.setErrorMessage("Failed to send follow-up email");
             log.error("❌ Failed to send follow-up email to {}", customer.getEmail());
+        }
+
+        reviewRequest = reviewRequestRepository.save(reviewRequest);
+        return convertToDto(reviewRequest);
+    }
+
+    /**
+     * NEW: Send follow-up SMS
+     */
+    @Transactional
+    public ReviewRequestDto sendFollowUpSms(User user, Long customerId, String followUpType) {
+        log.info("Sending {} follow-up SMS for customer {}", followUpType, customerId);
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        if (!customer.getBusiness().getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Access denied: Customer does not belong to your business");
+        }
+
+        // Validate phone number
+        if (customer.getPhone() == null || customer.getPhone().trim().isEmpty()) {
+            throw new RuntimeException("Customer phone number is required for SMS delivery");
+        }
+
+        // Get default template for reference
+        EmailTemplate template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(user, EmailTemplate.TemplateType.INITIAL_REQUEST)
+                .orElseThrow(() -> new RuntimeException("No default template found"));
+
+        Business business = customer.getBusiness();
+        String smsMessage = smsTemplateService.generateFollowUpMessage(customer, followUpType);
+        String reviewLink = "http://localhost:3000/feedback/" + customer.getId();
+
+        // Create follow-up SMS request record
+        ReviewRequest reviewRequest = ReviewRequest.builder()
+                .customer(customer)
+                .business(business)
+                .emailTemplate(template)
+                .deliveryMethod(ReviewRequest.DeliveryMethod.SMS)
+                .recipientEmail(customer.getEmail())
+                .recipientPhone(customer.getPhone())
+                .subject("SMS Follow-up: " + followUpType)
+                .smsMessage(smsMessage)
+                .reviewLink(reviewLink)
+                .status(ReviewRequest.RequestStatus.PENDING)
+                .build();
+
+        reviewRequest = reviewRequestRepository.save(reviewRequest);
+
+        // Send follow-up SMS
+        SmsService.SmsResult smsResult = smsService.sendFollowUpSms(customer, followUpType);
+
+        // Update status
+        if (smsResult.isSuccess()) {
+            reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
+            reviewRequest.setSentAt(LocalDateTime.now());
+            reviewRequest.setSmsMessageId(smsResult.getMessageSid());
+            reviewRequest.setSmsStatus(smsResult.getStatus());
+            log.info("✅ Follow-up SMS sent successfully to {}", customer.getPhone());
+        } else {
+            reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
+            reviewRequest.setErrorMessage("Failed to send follow-up SMS: " + smsResult.getErrorMessage());
+            log.error("❌ Failed to send follow-up SMS to {}: {}", customer.getPhone(), smsResult.getErrorMessage());
         }
 
         reviewRequest = reviewRequestRepository.save(reviewRequest);
@@ -277,7 +425,7 @@ public class ReviewRequestService {
     }
 
     /**
-     * NEW: Batch send review requests to multiple customers
+     * Batch send review requests to multiple customers (EMAIL by default)
      */
     @Transactional
     public List<ReviewRequestDto> sendBulkReviewRequests(User user, List<Long> customerIds) {
@@ -297,7 +445,27 @@ public class ReviewRequestService {
     }
 
     /**
-     * NEW: Test email functionality
+     * NEW: Batch send SMS review requests
+     */
+    @Transactional
+    public List<ReviewRequestDto> sendBulkSmsRequests(User user, List<Long> customerIds) {
+        log.info("Sending bulk SMS requests to {} customers", customerIds.size());
+
+        return customerIds.stream()
+                .map(customerId -> {
+                    try {
+                        return sendSmsReviewRequest(user, customerId);
+                    } catch (Exception e) {
+                        log.error("Failed to send SMS request to customer {}: {}", customerId, e.getMessage());
+                        return null;
+                    }
+                })
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Test email functionality
      */
     public boolean sendTestEmail(String toEmail) {
         try {
@@ -309,7 +477,19 @@ public class ReviewRequestService {
     }
 
     /**
-     * NEW: Force update templates to HTML versions
+     * NEW: Test SMS functionality
+     */
+    public SmsService.SmsResult sendTestSms(String phoneNumber, String message) {
+        try {
+            return smsService.sendTestSms(phoneNumber, message);
+        } catch (Exception e) {
+            log.error("Failed to send test SMS to {}: {}", phoneNumber, e.getMessage());
+            return SmsService.SmsResult.failure("Error sending test SMS: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Force update templates to HTML versions
      */
     public String forceUpdateTemplates(User user) {
         try {
@@ -323,13 +503,19 @@ public class ReviewRequestService {
     }
 
     /**
-     * NEW: Get template statistics for user
+     * Get template statistics for user (including SMS stats)
      */
     public Map<String, Object> getTemplateStats(User user) {
         try {
             List<EmailTemplateDto> allTemplates = emailTemplateService.getAllTemplatesByUser(user);
             List<EmailTemplateDto> userTemplates = emailTemplateService.getUserCreatedTemplates(user);
             List<EmailTemplateDto> systemTemplates = emailTemplateService.getSystemTemplates(user);
+
+            // Get review request stats
+            List<ReviewRequestDto> allRequests = getAllReviewRequestsByUser(user);
+            long smsRequests = allRequests.stream().filter(r ->
+                    "SMS".equals(r.getDeliveryMethod())).count();
+            long emailRequests = allRequests.size() - smsRequests;
 
             Map<String, Object> stats = new HashMap<>();
             stats.put("totalTemplates", allTemplates.size());
@@ -340,6 +526,9 @@ public class ReviewRequestService {
                     .collect(Collectors.groupingBy(
                             t -> t.getType().toString(),
                             Collectors.counting())));
+            stats.put("totalRequests", allRequests.size());
+            stats.put("smsRequests", smsRequests);
+            stats.put("emailRequests", emailRequests);
 
             return stats;
         } catch (Exception e) {
@@ -356,12 +545,18 @@ public class ReviewRequestService {
                 .customerId(request.getCustomer().getId())
                 .customerName(request.getCustomer().getName())
                 .customerEmail(request.getCustomer().getEmail())
+                .customerPhone(request.getCustomer().getPhone()) // NEW: Add phone to DTO
                 .businessId(request.getBusiness().getId())
                 .businessName(request.getBusiness().getName())
                 .templateId(request.getEmailTemplate().getId())
                 .templateName(request.getEmailTemplate().getName())
+                .deliveryMethod(request.getDeliveryMethod() != null ?
+                        request.getDeliveryMethod().name() : "EMAIL") // NEW: Add delivery method
                 .recipientEmail(request.getRecipientEmail())
+                .recipientPhone(request.getRecipientPhone()) // NEW: Add SMS recipient
                 .subject(request.getSubject())
+                .emailBody(request.getEmailBody())
+                .smsMessage(request.getSmsMessage()) // NEW: Add SMS content
                 .reviewLink(request.getReviewLink())
                 .status(request.getStatus())
                 .sentAt(request.getSentAt())
@@ -370,6 +565,8 @@ public class ReviewRequestService {
                 .reviewedAt(request.getReviewedAt())
                 .createdAt(request.getCreatedAt())
                 .errorMessage(request.getErrorMessage())
+                .smsMessageId(request.getSmsMessageId()) // NEW: Add Twilio SID
+                .smsStatus(request.getSmsStatus()) // NEW: Add SMS status
                 .build();
     }
 }
