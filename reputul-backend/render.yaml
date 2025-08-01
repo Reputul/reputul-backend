@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: reputul-backend
+    rootDir: reputul-backend
+    buildCommand: "./mvnw clean package -DskipTests"
+    startCommand: "java -jar target/*.jar"
+    env: java
