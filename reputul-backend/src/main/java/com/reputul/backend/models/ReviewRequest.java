@@ -34,7 +34,7 @@ public class ReviewRequest {
 
     // NEW: Delivery method support
     @Enumerated(EnumType.STRING)
-    @Column(name = "delivery_method", nullable = false)
+    @Column(name = "delivery_method")
     private DeliveryMethod deliveryMethod = DeliveryMethod.EMAIL;
 
     @Column(name = "recipient_email", nullable = false)
