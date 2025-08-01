@@ -1,7 +1,9 @@
 services:
   - type: web
     name: reputul-backend
+    env: docker
+    region: oregon
+    plan: free
+    dockerfilePath: ./Dockerfile
     rootDir: reputul-backend
-    buildCommand: "./mvnw clean package -DskipTests"
-    startCommand: "java -jar target/*.jar"
-    env: java
+    autoDeploy: true
