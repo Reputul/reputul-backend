@@ -3,18 +3,16 @@ FROM eclipse-temurin:17-jdk AS build
 
 WORKDIR /app
 
-# Copy the Maven wrapper files first to leverage Docker cache
+# Copy wrapper and config first (cache efficiency)
 COPY .mvn/ .mvn
 COPY mvnw .
 COPY pom.xml .
 
-# Pre-download dependencies to speed up builds
+# Make wrapper executable and go offline
 RUN chmod +x mvnw && ./mvnw dependency:go-offline
 
-# Copy the rest of the source code
+# Copy source code and build
 COPY src ./src
-
-# Build the application and skip tests
 RUN ./mvnw clean package -DskipTests
 
 # -------- Stage 2: Run the application --------
@@ -22,11 +20,9 @@ FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
-# Copy the built JAR file from the build stage
+# Copy the JAR from the build stage (now confirmed name and path)
 COPY --from=build /app/target/reputul-backend-0.0.1-SNAPSHOT.jar app.jar
 
-# Expose the port your Spring Boot app runs on
 EXPOSE 8080
 
-# Run the application
 ENTRYPOINT ["java", "-jar", "app.jar"]
