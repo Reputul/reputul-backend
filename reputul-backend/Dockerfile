@@ -21,7 +21,7 @@ FROM eclipse-temurin:17-jre
 WORKDIR /app
 
 # Copy the JAR from the build stage (now confirmed name and path)
-COPY --from=build /app/target/reputul-backend-0.0.1-SNAPSHOT.jar app.jar
+COPY --from=build /app/target/reputul-backend-0.0.1-SNAPSHOT.jar ./app.jar
 
 EXPOSE 8080
 
