@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: reputul-backend
+    env: docker
+    region: oregon
+    plan: free
+    dockerfilePath: ./Dockerfile
+    rootDir: reputul-backend
+    autoDeploy: true
