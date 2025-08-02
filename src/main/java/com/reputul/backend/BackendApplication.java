@@ -1,11 +1,17 @@
 package com.reputul.backend;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
 public class BackendApplication {
 
+	@PostConstruct
+	public void checkActiveProfile() {
+		System.out.println("✅ ACTIVE PROFILE: " + System.getProperty("spring.profiles.active"));
+		System.out.println("✅ SPRING_PROFILES_ACTIVE: " + System.getenv("SPRING_PROFILES_ACTIVE"));
+	}
 	public static void main(String[] args) {
 		SpringApplication.run(BackendApplication.class, args);
 	}
