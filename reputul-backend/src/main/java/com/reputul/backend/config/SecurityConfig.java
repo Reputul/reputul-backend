@@ -52,7 +52,8 @@ public class SecurityConfig {
                                 "/api/public/**",
                                 "/api/reviews/business/**",
                                 "/api/reviews/public/**",
-                                "/api/customers/**"
+                                "/api/customers/**",
+                                "/api/waitlist/**"  // 👈 ADD THIS LINE for waitlist endpoints
                         ).permitAll()
                         // All other endpoints require authentication
                         .anyRequest().authenticated()
