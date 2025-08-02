@@ -1,5 +1,8 @@
-# Single-stage build with JDK (simpler and more reliable)
+# Single-stage build with JDK
 FROM eclipse-temurin:21-jdk
+
+# Install bash (needed for Maven wrapper)
+RUN apt-get update && apt-get install -y bash && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
