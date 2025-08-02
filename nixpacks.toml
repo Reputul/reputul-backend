@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["openjdk21", "maven"]
+
+[phases.build]
+cmds = ["./mvnw clean package -DskipTests"]
+
+[phases.start]
+cmd = "java -jar target/*.jar"
+
+[variables]
+JAVA_HOME = "/nix/store/*-openjdk-21*/lib/openjdk"
