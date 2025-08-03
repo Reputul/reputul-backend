@@ -48,12 +48,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints - no authentication required
                         .requestMatchers(
+                                "/api/health",
                                 "/api/auth/**",
                                 "/api/public/**",
                                 "/api/reviews/business/**",
                                 "/api/reviews/public/**",
                                 "/api/customers/**",
-                                "/api/waitlist/**"  // 👈 ADD THIS LINE for waitlist endpoints
+                                "/api/waitlist/**"
                         ).permitAll()
                         // All other endpoints require authentication
                         .anyRequest().authenticated()
