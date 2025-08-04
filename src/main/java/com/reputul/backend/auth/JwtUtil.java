@@ -26,13 +26,18 @@ public class JwtUtil {
     }
 
     // Generate JWT
-    public String generateToken(String username) {
+    public String generateToken(String username, long expirationTime) {
         return Jwts.builder()
                 .setSubject(username)
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
+                .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
+    }
+
+    // Keep your original method for backward compatibility
+    public String generateToken(String username) {
+        return generateToken(username, 24 * 60 * 60 * 1000); // Default 24 hours
     }
 
     // Extract username (subject) from token

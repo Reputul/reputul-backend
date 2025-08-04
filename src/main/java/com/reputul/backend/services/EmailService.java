@@ -299,4 +299,108 @@ public class EmailService {
         // Generate unique review collection link
         return String.format("%s/business/%d/review", baseUrl, business.getId());
     }
+
+    /**
+     * NEW: Send password reset email
+     */
+    public boolean sendPasswordResetEmail(String toEmail, String resetToken) {
+        log.info("Sending password reset email to: {}", toEmail);
+
+        try {
+            String resetUrl = baseUrl + "/reset-password?token=" + resetToken;
+            String subject = "Reset Your Reputul Password";
+            String htmlContent = createPasswordResetEmailBody(resetUrl);
+
+            return sendHtmlEmail(
+                    toEmail,
+                    "", // No specific name needed
+                    subject,
+                    htmlContent,
+                    fromName // Use the configured fromName
+            );
+
+        } catch (Exception e) {
+            log.error("❌ Failed to send password reset email to: {}", toEmail, e);
+            return false;
+        }
+    }
+
+    /**
+     * NEW: Create password reset email HTML template
+     */
+    private String createPasswordResetEmailBody(String resetUrl) {
+        return String.format("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Reset Your Password</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+            <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #3b82f6 0%%, #8b5cf6 50%%, #6366f1 100%%); color: white; padding: 40px 20px; text-align: center;">
+                    <div style="background-color: rgba(255,255,255,0.2); width: 80px; height: 80px; border-radius: 50%%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
+                        <div style="font-size: 36px; font-weight: 900;">R</div>
+                    </div>
+                    <h1 style="margin: 0; font-size: 28px; font-weight: bold;">Reset Your Password</h1>
+                    <p style="margin: 10px 0 0 0; font-size: 18px; opacity: 0.9;">Reputul Account Security</p>
+                </div>
+                
+                <!-- Content -->
+                <div style="padding: 40px 30px;">
+                    <p style="font-size: 16px; line-height: 1.6; color: #374151; margin-bottom: 20px;">
+                        You requested a password reset for your Reputul account. No worries, it happens to the best of us!
+                    </p>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #374151; margin-bottom: 30px;">
+                        Click the button below to securely reset your password:
+                    </p>
+                    
+                    <!-- Reset Button -->
+                    <div style="text-align: center; margin: 40px 0;">
+                        <a href="%s" style="display: inline-block; background: linear-gradient(135deg, #3b82f6 0%%, #6366f1 100%%); color: white; text-decoration: none; padding: 16px 32px; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3); transition: all 0.3s ease;">
+                            🔒 Reset My Password
+                        </a>
+                    </div>
+                    
+                    <!-- Alternative Link -->
+                    <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 30px 0;">
+                        <p style="font-size: 14px; color: #6b7280; margin-bottom: 10px;">
+                            Or copy and paste this link in your browser:
+                        </p>
+                        <p style="font-size: 14px; word-break: break-all; color: #3b82f6; margin: 0;">
+                            <a href="%s" style="color: #3b82f6;">%s</a>
+                        </p>
+                    </div>
+                    
+                    <!-- Security Notice -->
+                    <div style="border-left: 4px solid #fbbf24; background-color: #fefbf2; padding: 16px; margin: 25px 0; border-radius: 0 8px 8px 0;">
+                        <p style="font-size: 14px; color: #92400e; margin: 0; font-weight: 500;">
+                            ⚠️ <strong>Security Notice:</strong> This link will expire in 1 hour for your protection.
+                        </p>
+                    </div>
+                    
+                    <p style="font-size: 14px; line-height: 1.5; color: #6b7280; margin: 20px 0 0 0;">
+                        If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
+                    </p>
+                </div>
+                
+                <!-- Footer -->
+                <div style="background-color: #f9fafb; padding: 30px; text-align: center; border-top: 1px solid #e5e7eb;">
+                    <p style="font-size: 14px; color: #6b7280; margin: 0 0 10px 0;">
+                        This email was sent by <strong>Reputul</strong>
+                    </p>
+                    <p style="font-size: 12px; color: #9ca3af; margin: 0;">
+                        Helping contractors build better reputations, one review at a time.
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """, resetUrl, resetUrl, resetUrl);
+    }
+
+
 }
