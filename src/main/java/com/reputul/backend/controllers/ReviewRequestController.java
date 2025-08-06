@@ -1,10 +1,8 @@
 package com.reputul.backend.controllers;
 
 import com.reputul.backend.dto.*;
-import com.reputul.backend.models.EmailTemplate;
-import com.reputul.backend.models.ReviewRequest;
-import com.reputul.backend.models.User;
-import com.reputul.backend.models.Customer;
+import com.reputul.backend.models.*;
+import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.EmailTemplateRepository;
 import com.reputul.backend.repositories.UserRepository;
 import com.reputul.backend.repositories.CustomerRepository;
@@ -17,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +33,7 @@ public class ReviewRequestController {
     private final UserRepository userRepository;
     private final EmailTemplateRepository emailTemplateRepository;
     private final CustomerRepository customerRepository;
+    private final BusinessRepository businessRepository;
 
     @PostMapping("")
     public ResponseEntity<?> sendReviewRequest(
@@ -122,6 +122,106 @@ public class ReviewRequestController {
             return ResponseEntity.ok(results);
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @PostMapping("/send-direct")
+    public ResponseEntity<?> sendDirectReviewRequest(
+            @RequestBody Map<String, Object> request,
+            Authentication authentication) {
+        try {
+            User user = getCurrentUser(authentication);
+
+            // Extract data that the frontend actually sends
+            Long businessId = Long.valueOf(request.get("selectedBusiness").toString());
+            String customerEmail = request.get("customerEmail").toString();
+            String customerName = request.get("customerName").toString();
+            String message = request.getOrDefault("message", "").toString();
+
+            log.info("🚀 Sending direct review request to: {} for business: {}", customerEmail, businessId);
+
+            // Get the actual business and validate it belongs to the user
+            Business business = businessRepository.findById(businessId)
+                    .orElseThrow(() -> new RuntimeException("Business not found"));
+
+            if (!business.getUser().getId().equals(user.getId())) {
+                throw new RuntimeException("Access denied: Business does not belong to you");
+            }
+
+            // Get the default email template (ID 1)
+            EmailTemplate template = emailTemplateRepository.findById(1L)
+                    .orElseThrow(() -> new RuntimeException("Default email template not found"));
+
+            // Use actual business data from your Business entity
+            String businessName = business.getName() != null ? business.getName() : "Your Business";
+            String businessPhone = business.getPhone() != null ? business.getPhone() : "";
+            String businessWebsite = business.getWebsite() != null ? business.getWebsite() : "";
+
+            // Generate review URLs using actual business data
+            String baseUrl = "https://reputul.com";
+
+            // Generate Google review URL from googlePlaceId if available
+            String googleReviewUrl = business.getGooglePlaceId() != null ?
+                    "https://search.google.com/local/writereview?placeid=" + business.getGooglePlaceId() :
+                    "https://www.google.com/search?q=" + businessName.replace(" ", "+") + "+reviews";
+
+            // Generate Facebook review URL from facebookPageUrl if available
+            String facebookReviewUrl = business.getFacebookPageUrl() != null ?
+                    business.getFacebookPageUrl() + "/reviews" :
+                    "https://www.facebook.com/search/top?q=" + businessName.replace(" ", "%20");
+
+            // Generate private feedback URL (placeholder for now)
+            String privateReviewUrl = baseUrl + "/feedback/" + businessId;
+            String unsubscribeUrl = baseUrl + "/unsubscribe/" + businessId;
+
+            // Replace template variables with actual business data
+            String emailBody = template.getBody()
+                    .replace("{{customerName}}", customerName)
+                    .replace("{{businessName}}", businessName)
+                    .replace("{{businessPhone}}", businessPhone)
+                    .replace("{{businessWebsite}}", businessWebsite)
+                    .replace("{{serviceType}}", business.getIndustry() != null ? business.getIndustry() : "Service")
+                    .replace("{{serviceDate}}", java.time.LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM d, yyyy")))
+                    .replace("{{googleReviewUrl}}", googleReviewUrl)
+                    .replace("{{facebookReviewUrl}}", facebookReviewUrl)
+                    .replace("{{privateReviewUrl}}", privateReviewUrl)
+                    .replace("{{unsubscribeUrl}}", unsubscribeUrl);
+
+            // Add custom message if provided
+            if (!message.isEmpty()) {
+                emailBody = emailBody.replace("We hope you were completely satisfied with our service.",
+                        "We hope you were completely satisfied with our service. " + message);
+            }
+
+            String subject = "Share Your Experience with " + businessName;
+
+            // Send the email using your existing method
+            boolean sent = emailService.sendTestEmail(customerEmail, subject, emailBody);
+
+            if (sent) {
+                log.info("✅ Review request email sent successfully to {}", customerEmail);
+            } else {
+                log.error("❌ Failed to send review request email to {}", customerEmail);
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "status", sent ? "SENT" : "FAILED",
+                    "deliveryMethod", "EMAIL",
+                    "message", sent ? "Review request sent successfully!" : "Failed to send email",
+                    "recipient", customerEmail,
+                    "businessName", businessName,
+                    "googleReviewUrl", googleReviewUrl,
+                    "facebookReviewUrl", facebookReviewUrl
+            ));
+
+        } catch (Exception e) {
+            log.error("❌ Error sending direct review request: {}", e.getMessage());
+            e.printStackTrace();
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "FAILED",
+                    "errorMessage", e.getMessage()
+            ));
         }
     }
 

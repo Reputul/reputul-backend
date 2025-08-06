@@ -43,7 +43,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
-                .cors(Customizer.withDefaults())
+                .cors(Customizer.withDefaults()) // This is correct - uses WebConfig CORS settings
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints - no authentication required
@@ -54,7 +54,8 @@ public class SecurityConfig {
                                 "/api/reviews/business/**",
                                 "/api/reviews/public/**",
                                 "/api/customers/**",
-                                "/api/waitlist/**"
+                                "/api/waitlist/**",
+                                "/api/review-requests/send-direct"
                         ).permitAll()
                         // All other endpoints require authentication
                         .anyRequest().authenticated()

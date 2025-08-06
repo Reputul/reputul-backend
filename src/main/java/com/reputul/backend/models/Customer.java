@@ -93,7 +93,8 @@ public class Customer {
     public enum CustomerStatus {
         COMPLETED,
         PENDING,
-        CANCELLED
+        CANCELLED,
+        CONTACTED
     }
 
     public enum CustomerTag {
