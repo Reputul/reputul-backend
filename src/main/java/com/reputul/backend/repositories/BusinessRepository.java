@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Optional;
 
 public interface BusinessRepository extends JpaRepository<Business, Long> {
+
+    // ===== EXISTING METHODS (Keep these) =====
     List<Business> findByUserId(Long ownerId);
     Optional<Business> findByIdAndUserId(Long id, Long ownerId);
 
@@ -28,4 +30,44 @@ public interface BusinessRepository extends JpaRepository<Business, Long> {
 
     // Find all businesses for owner ordered by creation date
     List<Business> findByUserOrderByCreatedAtDesc(User user);
+
+    // ===== NEW METHODS FOR PUBLIC CONTROLLER =====
+
+    /**
+     * Find businesses by industry (case-insensitive)
+     * Used by: GET /api/public/businesses/industry/{industry}
+     */
+    List<Business> findByIndustryIgnoreCase(String industry);
+
+    /**
+     * Search businesses by name containing text (case-insensitive)
+     * Used by: GET /api/public/businesses/search?name={name}
+     */
+    List<Business> findByNameContainingIgnoreCase(String name);
+
+    // ===== OPTIONAL: ADDITIONAL PUBLIC SEARCH METHODS =====
+
+    /**
+     * Find businesses by industry and order by reputation score descending
+     * Useful for showing top-rated businesses in an industry
+     */
+    List<Business> findByIndustryIgnoreCaseOrderByReputationScoreDesc(String industry);
+
+    /**
+     * Find businesses with minimum reputation score
+     * Useful for filtering quality businesses
+     */
+    List<Business> findByReputationScoreGreaterThanEqual(Double minScore);
+
+    /**
+     * Find businesses by badge type
+     * Useful for finding "Top Rated" or "Rising Star" businesses
+     */
+    List<Business> findByBadge(String badge);
+
+    /**
+     * Find businesses in a specific city/location
+     * Useful if you want location-based searching
+     */
+    List<Business> findByAddressContainingIgnoreCase(String location);
 }

@@ -13,6 +13,9 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     // Get all reviews for a business
     List<Review> findByBusinessId(Long businessId);
 
+    // ===== ADDED: Get all reviews for a business ordered by creation date =====
+    List<Review> findByBusinessIdOrderByCreatedAtDesc(Long businessId);
+
     // Get all reviews for a business with sorting
     @Query("SELECT r FROM Review r WHERE r.business.id = :businessId")
     List<Review> findByBusinessIdOrderBy(@Param("businessId") Long businessId, Sort sort);
