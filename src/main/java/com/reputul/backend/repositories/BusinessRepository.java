@@ -9,7 +9,6 @@ import java.util.Optional;
 
 public interface BusinessRepository extends JpaRepository<Business, Long> {
 
-    // ===== EXISTING METHODS (Keep these) =====
     List<Business> findByUserId(Long ownerId);
     Optional<Business> findByIdAndUserId(Long id, Long ownerId);
 
@@ -18,6 +17,8 @@ public interface BusinessRepository extends JpaRepository<Business, Long> {
 
     // Find all businesses for a specific owner
     List<Business> findByUser(User user);
+
+    Business findFirstByUserOrderByCreatedAtAsc(User user);
 
     // Check if business exists and belongs to user
     boolean existsByIdAndUser(Long id, User user);

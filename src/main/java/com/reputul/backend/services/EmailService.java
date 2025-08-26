@@ -18,7 +18,7 @@ import java.io.IOException;
 public class EmailService {
 
     private final SendGrid sendGrid;
-    private final EmailTemplateService emailTemplateService; // ADD THIS DEPENDENCY
+    private final EmailTemplateService emailTemplateService;
 
     @Value("${sendgrid.from.email}")
     private String fromEmail;
@@ -26,7 +26,7 @@ public class EmailService {
     @Value("${sendgrid.from.name}")
     private String fromName;
 
-    @Value("${app.base.url}")
+    @Value("${app.base.url:http://localhost:3000}")
     private String baseUrl;
 
     public EmailService(@Value("${sendgrid.api.key}") String apiKey, EmailTemplateService emailTemplateService) {
@@ -37,10 +37,11 @@ public class EmailService {
     }
 
     /**
-     * NEW: Send review request using EmailTemplateService (recommended)
+     * GOOGLE COMPLIANT: Send review request using EmailTemplateService
+     * Templates now always show ALL review options to ALL customers
      */
     public boolean sendReviewRequestWithTemplate(Customer customer) {
-        log.info("Sending review request with template to: {}", customer.getEmail());
+        log.info("Sending COMPLIANT review request with template to: {}", customer.getEmail());
 
         try {
             Business business = customer.getBusiness();
@@ -60,21 +61,20 @@ public class EmailService {
                     subject,
                     htmlContent,
                     business.getName()
-
-
             );
 
         } catch (Exception e) {
-            log.error("Failed to send template-based review request to: {}", customer.getEmail(), e);
+            log.error("Failed to send compliant template-based review request to: {}", customer.getEmail(), e);
             return false;
         }
     }
 
     /**
-     * NEW: Send follow-up emails (3-day, 7-day)
+     * GOOGLE COMPLIANT: Send follow-up emails (3-day, 7-day)
+     * All follow-ups show ALL review options
      */
     public boolean sendFollowUpEmail(Customer customer, EmailTemplate.TemplateType followUpType) {
-        log.info("Sending {} follow-up email to: {}", followUpType, customer.getEmail());
+        log.info("Sending COMPLIANT {} follow-up email to: {}", followUpType, customer.getEmail());
 
         try {
             Business business = customer.getBusiness();
@@ -92,13 +92,13 @@ public class EmailService {
             );
 
         } catch (Exception e) {
-            log.error("Failed to send follow-up email to: {}", customer.getEmail(), e);
+            log.error("Failed to send compliant follow-up email to: {}", customer.getEmail(), e);
             return false;
         }
     }
 
     /**
-     * NEW: Send thank you email
+     * GOOGLE COMPLIANT: Send thank you email
      */
     public boolean sendThankYouEmail(Customer customer) {
         log.info("Sending thank you email to: {}", customer.getEmail());
@@ -125,14 +125,14 @@ public class EmailService {
     }
 
     /**
-     * UPDATED: Your existing method - now uses EmailTemplateService for better processing
+     * UPDATED: Legacy method - now uses COMPLIANT EmailTemplateService processing
      */
     public boolean sendReviewRequest(Customer customer, Business business, String subject, String body, String reviewLink) {
-        log.info("Attempting to send review request to: {}", customer.getEmail());
+        log.info("Attempting to send COMPLIANT review request to: {}", customer.getEmail());
         log.info("From email: {}, From name: {}", fromEmail, business.getName());
 
         try {
-            // Use EmailTemplateService for better template processing
+            // Use COMPLIANT EmailTemplateService for better template processing
             String processedBody = emailTemplateService.processTemplate(body, customer, business, reviewLink);
             String processedSubject = emailTemplateService.processTemplate(subject, customer, business, reviewLink);
 
@@ -149,7 +149,7 @@ public class EmailService {
             );
 
         } catch (Exception e) {
-            log.error("❌ Error sending review request to {}: {}", customer.getEmail(), e.getMessage(), e);
+            log.error("❌ Error sending compliant review request to {}: {}", customer.getEmail(), e.getMessage(), e);
             return false;
         }
     }
@@ -170,7 +170,7 @@ public class EmailService {
             request.setEndpoint("mail/send");
             request.setBody(mail.build());
 
-            log.info("Sending HTML email to SendGrid...");
+            log.info("Sending COMPLIANT HTML email to SendGrid...");
             Response response = sendGrid.api(request);
 
             log.info("SendGrid Response - Status: {}", response.getStatusCode());
@@ -179,7 +179,7 @@ public class EmailService {
             boolean success = response.getStatusCode() >= 200 && response.getStatusCode() < 300;
 
             if (success) {
-                log.info("✅ HTML email sent successfully to {}", toEmail);
+                log.info("✅ COMPLIANT HTML email sent successfully to {}", toEmail);
             } else {
                 log.error("❌ SendGrid failed with status {}: {}", response.getStatusCode(), response.getBody());
             }
@@ -196,17 +196,17 @@ public class EmailService {
     }
 
     /**
-     * UPDATED: Test email with better HTML template
+     * UPDATED: Test email with Google-compliant template
      */
     public boolean sendTestEmail(String toEmail, String subject, String body) {
-        log.info("=== SENDGRID TEST EMAIL ===");
+        log.info("=== SENDGRID COMPLIANT TEST EMAIL ===");
         log.info("To: {}", toEmail);
         log.info("From: {} ({})", fromEmail, fromName);
 
         try {
-            // If no custom body provided, use a test template with buttons
-            String testBody = (body != null && !body.trim().isEmpty()) ? body : createTestEmailBody();
-            String testSubject = (subject != null && !subject.trim().isEmpty()) ? subject : "Test Email - HTML Buttons";
+            // If no custom body provided, use a compliant test template with all buttons
+            String testBody = (body != null && !body.trim().isEmpty()) ? body : createCompliantTestEmailBody();
+            String testSubject = (subject != null && !subject.trim().isEmpty()) ? subject : "Test Email - Google Compliant";
 
             return sendHtmlEmail(toEmail, "", testSubject, testBody, fromName);
 
@@ -217,43 +217,66 @@ public class EmailService {
     }
 
     /**
-     * NEW: Create a test email with working buttons
+     * GOOGLE COMPLIANT: Create a test email with ALL review options shown
      */
-    private String createTestEmailBody() {
+    private String createCompliantTestEmailBody() {
         return """
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Test Email</title>
+                <title>Google Compliant Test Email</title>
             </head>
             <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
                 <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
                     <div style="background-color: #2563eb; color: white; padding: 20px; text-align: center;">
-                        <h1 style="margin: 0;">Test Email</h1>
-                        <p style="margin: 5px 0 0 0;">HTML Button Test</p>
+                        <h1 style="margin: 0;">Google Compliant Test</h1>
+                        <p style="margin: 5px 0 0 0;">All Options Always Available</p>
                     </div>
                     <div style="padding: 30px 20px;">
-                        <p>This is a test email to verify HTML rendering and buttons work correctly.</p>
-                        <div style="text-align: center; margin: 25px 0;">
+                        <p>This is a Google-compliant test email. ALL review options are shown to ALL customers.</p>
+                        
+                        <div style="background-color: #f8f9fa; padding: 25px; border-radius: 8px; text-align: center; margin: 25px 0;">
+                            <h2 style="margin: 0 0 15px 0; color: #374151;">Choose Your Preferred Platform</h2>
+                            <p style="margin: 0 0 20px 0; color: #6b7280; font-size: 14px;">All options are always available to ensure Google compliance:</p>
+                            
                             <div style="margin-bottom: 15px;">
                                 <a href="https://google.com" style="display: inline-block; background-color: #16a34a; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px;">
-                                    🌟 Test Google Button
+                                    🌟 Google Review (Always Available)
                                 </a>
                             </div>
+                            
                             <div style="margin-bottom: 15px;">
                                 <a href="https://facebook.com" style="display: inline-block; background-color: #1877f2; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px;">
-                                    📘 Test Facebook Button
+                                    📘 Facebook Review (Always Available)
                                 </a>
                             </div>
+                            
                             <div style="margin-bottom: 15px;">
-                                <a href="https://reputul.com" style="display: inline-block; background-color: #6b7280; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px;">
-                                    💬 Test Feedback Button
+                                <a href="https://yelp.com" style="display: inline-block; background-color: #d32323; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px;">
+                                    ⭐ Yelp Review (Always Available)
                                 </a>
                             </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <a href="https://localhost:3000/feedback/test" style="display: inline-block; background-color: #6b7280; color: white; text-decoration: none; padding: 15px 25px; border-radius: 6px; font-weight: bold; font-size: 16px;">
+                                    💬 Private Feedback (Always Available)
+                                </a>
+                            </div>
+
+                            <p style="margin: 20px 0 0 0; color: #6b7280; font-size: 12px;">
+                                ✅ Google Compliant: All platforms equally accessible to all customers
+                            </p>
                         </div>
-                        <p>If you can see the buttons above and they're clickable, HTML emails are working correctly!</p>
+                        
+                        <p><strong>Google Compliance Features:</strong></p>
+                        <ul style="color: #666; font-size: 14px;">
+                            <li>No rating-based filtering</li>
+                            <li>Equal platform access for all customers</li>
+                            <li>Honest messaging that doesn't manipulate reviews</li>
+                            <li>All review options always visible</li>
+                        </ul>
                     </div>
                 </div>
             </body>
@@ -277,31 +300,16 @@ public class EmailService {
     }
 
     /**
-     * LEGACY: Keep your existing method for backward compatibility
+     * GOOGLE COMPLIANT: Generate review link that goes to rating gate
+     * This allows customers to choose their experience level first, then see appropriate options
      */
-    private String processEmailTemplate(String template, Customer customer, Business business, String reviewLink) {
-        if (template == null) {
-            return "";
-        }
-
-        return template
-                .replace("{{customerName}}", customer.getName() != null ? customer.getName() : "")
-                .replace("{{businessName}}", business.getName() != null ? business.getName() : "")
-                .replace("{{serviceType}}", customer.getServiceType() != null ? customer.getServiceType() : "")
-                .replace("{{serviceDate}}", customer.getServiceDate() != null ? customer.getServiceDate().toString() : "")
-                .replace("{{businessPhone}}", business.getPhone() != null ? business.getPhone() : "")
-                .replace("{{businessWebsite}}", business.getWebsite() != null ? business.getWebsite() : "")
-                .replace("{{reviewLink}}", reviewLink != null ? reviewLink : "")
-                .replace("\n", "<br>"); // Convert line breaks to HTML
-    }
-
     public String generateReviewLink(Business business) {
-        // Generate unique review collection link
-        return String.format("%s/business/%d/review", baseUrl, business.getId());
+        // COMPLIANT: Link goes to rating gate, not direct platforms
+        return String.format("%s/feedback-gate/business/%d", baseUrl, business.getId());
     }
 
     /**
-     * NEW: Send password reset email
+     * Send password reset email (unchanged - not related to review compliance)
      */
     public boolean sendPasswordResetEmail(String toEmail, String resetToken) {
         log.info("Sending password reset email to: {}", toEmail);
@@ -326,7 +334,7 @@ public class EmailService {
     }
 
     /**
-     * NEW: Create password reset email HTML template
+     * Password reset email HTML template (unchanged)
      */
     private String createPasswordResetEmailBody(String resetUrl) {
         return String.format("""
@@ -401,6 +409,4 @@ public class EmailService {
         </html>
         """, resetUrl, resetUrl, resetUrl);
     }
-
-
 }

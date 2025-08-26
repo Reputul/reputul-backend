@@ -7,35 +7,110 @@ import com.reputul.backend.models.Review;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.CustomerRepository;
 import com.reputul.backend.repositories.ReviewRepository;
+import com.reputul.backend.services.FeedbackGateService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/customers")
-// REMOVED: @CrossOrigin(origins = "*") - Let global WebConfig handle CORS
+@RequiredArgsConstructor
+@Slf4j
 public class CustomerFeedbackController {
 
     private final CustomerRepository customerRepository;
     private final BusinessRepository businessRepository;
     private final ReviewRepository reviewRepository;
+    private final FeedbackGateService feedbackGateService;
 
-    public CustomerFeedbackController(
-            CustomerRepository customerRepository,
-            BusinessRepository businessRepository,
-            ReviewRepository reviewRepository) {
-        this.customerRepository = customerRepository;
-        this.businessRepository = businessRepository;
-        this.reviewRepository = reviewRepository;
+    // ===========================================
+    // NEW: FEEDBACK GATE ENDPOINTS
+    // ===========================================
+
+    /**
+     * Get customer info for feedback gate page
+     * NEW ENDPOINT: /api/customers/{customerId}/gate-info
+     */
+    @GetMapping("/{customerId}/gate-info")
+    public ResponseEntity<?> getCustomerGateInfo(@PathVariable Long customerId) {
+        try {
+            FeedbackGateResponse response = feedbackGateService.getCustomerGateInfo(customerId);
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Error fetching customer gate info for ID {}: {}", customerId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error fetching customer gate info: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Error retrieving customer information"));
+        }
     }
 
     /**
+     * Process rating gate submission - CORE NEW FUNCTIONALITY
+     * NEW ENDPOINT: /api/customers/{customerId}/rate
+     */
+    @PostMapping("/{customerId}/rate")
+    public ResponseEntity<?> submitRatingGate(
+            @PathVariable Long customerId,
+            @Valid @RequestBody FeedbackGateRequest request) {
+
+        try {
+            log.info("Rating gate submission for customer {} with rating {}", customerId, request.getRating());
+
+            FeedbackGateResponse response = feedbackGateService.processRatingGate(customerId, request);
+
+            log.info("Rating gate processed successfully - routing decision: {} for customer {}",
+                    response.getRoutingDecision(), customerId);
+
+            return ResponseEntity.ok(response);
+
+        } catch (RuntimeException e) {
+            log.error("Error processing rating gate for customer {}: {}", customerId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error processing rating gate: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Error processing rating"));
+        }
+    }
+
+    /**
+     * Check if customer has already used the feedback gate
+     * NEW ENDPOINT: /api/customers/{customerId}/gate-status
+     */
+    @GetMapping("/{customerId}/gate-status")
+    public ResponseEntity<?> checkGateStatus(@PathVariable Long customerId) {
+        try {
+            boolean hasUsedGate = feedbackGateService.hasCustomerUsedGate(customerId);
+            return ResponseEntity.ok(Map.of(
+                    "customerId", customerId,
+                    "hasUsedGate", hasUsedGate,
+                    "message", hasUsedGate ? "Customer has already provided initial rating" : "Customer can use feedback gate"
+            ));
+        } catch (Exception e) {
+            log.error("Error checking gate status for customer {}: {}", customerId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Error checking gate status"));
+        }
+    }
+
+    // ===========================================
+    // EXISTING ENDPOINTS (PRESERVED)
+    // ===========================================
+
+    /**
      * Get customer and business information for feedback page
-     * Public endpoint - no authentication required
+     * EXISTING ENDPOINT - Used by private feedback form
      */
     @GetMapping("/{customerId}/feedback-info")
     public ResponseEntity<?> getCustomerFeedbackInfo(@PathVariable Long customerId) {
@@ -95,8 +170,8 @@ public class CustomerFeedbackController {
     }
 
     /**
-     * Submit customer feedback
-     * Public endpoint - no authentication required
+     * Submit customer feedback - PRIVATE FEEDBACK FORM
+     * EXISTING ENDPOINT - Now primarily used for private feedback (1-3 star followups)
      */
     @PostMapping("/{customerId}/feedback")
     public ResponseEntity<?> submitCustomerFeedback(
@@ -129,24 +204,24 @@ public class CustomerFeedbackController {
                         .body("Associated business not found.");
             }
 
-            // Create review record
+            // Create review record - Now marked more specifically
             Review review = Review.builder()
                     .rating(request.getRating())
                     .comment(request.getComment().trim())
                     .business(business)
-                    .customer(customer) // Link to customer for tracking
+                    .customer(customer)
                     .customerName(customer.getName())
                     .customerEmail(customer.getEmail())
-                    .source(request.getType() != null && request.getType().equals("private") ? "private_feedback" : "public_feedback")
+                    .source(request.getType() != null && request.getType().equals("private") ?
+                            "private_feedback" : "detailed_feedback") // More specific labeling
                     .createdAt(LocalDateTime.now())
                     .build();
 
             Review savedReview = reviewRepository.save(review);
 
-            // Update customer record to track feedback submission
+            // Update customer record
             customer.setLastFeedbackDate(LocalDateTime.now());
             customer.setFeedbackSubmitted(true);
-            // Handle null feedback count safely
             Integer currentCount = customer.getFeedbackCount();
             customer.setFeedbackCount(currentCount != null ? currentCount + 1 : 1);
             customerRepository.save(customer);
@@ -154,21 +229,25 @@ public class CustomerFeedbackController {
             FeedbackResponse response = FeedbackResponse.builder()
                     .id(savedReview.getId())
                     .success(true)
-                    .message("Thank you for your feedback! We truly appreciate your time and insights.")
+                    .message("Thank you for your detailed feedback! We truly appreciate your time and insights.")
                     .build();
 
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
+            log.error("Error submitting feedback for customer {}: {}", customerId, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error submitting feedback: " + e.getMessage());
         }
     }
 
-    // Add this method to your CustomerFeedbackController.java:
+    // ===========================================
+    // UTILITY ENDPOINTS (PRESERVED)
+    // ===========================================
 
     /**
      * Test endpoint to verify customer exists and data is accessible
+     * EXISTING ENDPOINT
      */
     @GetMapping("/{customerId}/test")
     public ResponseEntity<?> testCustomerAccess(@PathVariable Long customerId) {
@@ -194,8 +273,10 @@ public class CustomerFeedbackController {
                     "businessName", business != null ? business.getName() : "No business",
                     "serviceType", customer.getServiceType(),
                     "email", customer.getEmail(),
-                    "correctFeedbackUrl", "http://localhost:3000/feedback/" + customer.getId(),
-                    "backendEndpoint", "http://localhost:8080/api/customers/" + customer.getId() + "/feedback-info"
+                    "newFeedbackGateUrl", "http://localhost:3000/feedback-gate/" + customer.getId(),
+                    "existingFeedbackUrl", "http://localhost:3000/feedback/" + customer.getId(),
+                    "gateEndpoint", "http://localhost:8080/api/customers/" + customer.getId() + "/gate-info",
+                    "rateEndpoint", "http://localhost:8080/api/customers/" + customer.getId() + "/rate"
             ));
 
         } catch (Exception e) {
@@ -210,9 +291,10 @@ public class CustomerFeedbackController {
 
     /**
      * Health check endpoint
+     * EXISTING ENDPOINT
      */
     @GetMapping("/feedback/health")
     public ResponseEntity<String> healthCheck() {
-        return ResponseEntity.ok("Customer feedback service is running");
+        return ResponseEntity.ok("Customer feedback service is running with feedback gate support");
     }
 }

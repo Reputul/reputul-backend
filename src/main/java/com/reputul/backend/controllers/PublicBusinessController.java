@@ -90,13 +90,13 @@ public class PublicBusinessController {
 
             double avgRating = reviewRepo.findAverageRatingByBusinessId(id) != null
                     ? reviewRepo.findAverageRatingByBusinessId(id) : 0.0;
-            int total = reviewRepo.countByBusinessId(id);
+            long total = reviewRepo.countByBusinessId(id);
             List<Review> recent = reviewRepo.findTop1ByBusinessIdOrderByCreatedAtDesc(id);
             String comment = recent.isEmpty() ? "No reviews yet." : recent.get(0).getComment();
 
             String badge = business.getBadge() != null ? business.getBadge() : "Unranked";
 
-            ReviewSummaryDto summary = new ReviewSummaryDto(avgRating, total, comment, badge);
+            ReviewSummaryDto summary = new ReviewSummaryDto(avgRating, (int) total, comment, badge);
             return ResponseEntity.ok(summary);
         } catch (Exception e) {
             System.out.println("❌ Error in getPublicReviewSummary: " + e.getMessage());

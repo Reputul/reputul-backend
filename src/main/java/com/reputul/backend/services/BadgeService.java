@@ -14,9 +14,10 @@ public class BadgeService {
     }
 
     /**
+     * BETTER: Updated to use long (future-proof)
      * Determines badge based on average rating and review volume.
      */
-    public String determineBadge(double avgRating, int totalReviews) {
+    public String determineBadge(double avgRating, long totalReviews) {
         if (totalReviews == 0) return "No Reviews Yet";
         if (avgRating >= 4.8 && totalReviews >= 10) return "Top Rated";
         if (avgRating >= 4.0 && totalReviews >= 5) return "Rising Star";
@@ -24,18 +25,28 @@ public class BadgeService {
     }
 
     /**
+     * BETTER: Updated to use long consistently
      * Calculates and updates the badge on a Business entity (but does not persist it).
      * @param business the business to update
      * @return the assigned badge
      */
     public String updateBusinessBadge(Business business) {
         Double avgRating = reviewRepo.findAverageRatingByBusinessId(business.getId());
-        int totalReviews = reviewRepo.countByBusinessId(business.getId());
+        long totalReviews = reviewRepo.countByBusinessId(business.getId());
 
         double avg = avgRating != null ? avgRating : 0.0;
         String newBadge = determineBadge(avg, totalReviews);
 
         business.setBadge(newBadge);
         return newBadge;
+    }
+
+    /**
+     * BACKWARD COMPATIBILITY: Keep the old int version for existing code
+     * @deprecated Use determineBadge(double, long) instead
+     */
+    @Deprecated
+    public String determineBadge(double avgRating, int totalReviews) {
+        return determineBadge(avgRating, (long) totalReviews);
     }
 }
