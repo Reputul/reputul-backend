@@ -3,6 +3,7 @@ package com.reputul.backend.services;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.Customer;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URLEncoder;
@@ -19,92 +20,109 @@ public class SmsTemplateService {
     private static final int SMS_CONCAT_LIMIT = 1600;
     private static final int SMS_UNICODE_LIMIT = 70;
 
+    @Value("${app.business.name:Reputul}")
+    private String businessName;
+
+    @Value("${app.support.phone:1-800-REPUTUL}")
+    private String supportPhone;
+
+    @Value("${app.support.email:support@reputul.com}")
+    private String supportEmail;
+
     /**
-     * Generate review request SMS message for customer
+     * Generate compliance-aware review request SMS message
      */
     public String generateReviewRequestMessage(Customer customer) {
         try {
-            // Create optimized SMS template for review requests
-            String template = getReviewRequestTemplate();
-
-            // Generate variables map
+            String template = getComplianceReviewRequestTemplate();
             Map<String, String> variables = createSmsVariableMap(customer);
-
-            // Render and optimize for SMS
             String message = renderTemplate(template, variables);
             return optimizeForSms(message);
 
         } catch (Exception e) {
             log.error("Failed to generate review request SMS for customer {}: {}", customer.getId(), e.getMessage());
-            return createFallbackMessage(customer);
+            return createComplianceFallbackMessage(customer);
         }
     }
 
     /**
-     * Generate follow-up SMS message
+     * Generate compliance-aware follow-up SMS message
      */
     public String generateFollowUpMessage(Customer customer, String followUpType) {
         try {
-            String template = getFollowUpTemplate(followUpType);
+            String template = getComplianceFollowUpTemplate(followUpType);
             Map<String, String> variables = createSmsVariableMap(customer);
             String message = renderTemplate(template, variables);
             return optimizeForSms(message);
 
         } catch (Exception e) {
             log.error("Failed to generate follow-up SMS for customer {}: {}", customer.getId(), e.getMessage());
-            return createFallbackFollowUpMessage(customer);
+            return createComplianceFollowUpFallbackMessage(customer);
         }
     }
 
     /**
-     * SMS-optimized review request template
+     * COMPLIANCE: SMS-optimized review request template with required disclosures
      */
-    private String getReviewRequestTemplate() {
-        return "Hi {{customerName}}! Thanks for choosing {{businessName}} for your {{serviceType}}. " +
+    private String getComplianceReviewRequestTemplate() {
+        return "{{businessName}}: Hi {{customerName}}! Thanks for your {{serviceType}}. " +
                 "Share your experience: {{reviewUrl}} " +
-                "Reply STOP to opt out.";
+                "Reply STOP to opt out. Msg rates apply. {{supportContact}}";
     }
 
     /**
-     * SMS follow-up templates
+     * COMPLIANCE: SMS follow-up templates with required disclosures
      */
-    private String getFollowUpTemplate(String followUpType) {
+    private String getComplianceFollowUpTemplate(String followUpType) {
         switch (followUpType.toLowerCase()) {
             case "3_day":
-                return "Hi {{customerName}}! Hope you're happy with your {{serviceType}} from {{businessName}}. " +
-                        "Quick review: {{reviewUrl}} Thanks!";
+                return "{{businessName}}: Hi {{customerName}}! Hope your {{serviceType}} went well. " +
+                        "Quick review: {{reviewUrl}} Reply STOP to opt out. {{supportContact}}";
             case "7_day":
-                return "Hi {{customerName}}, how was your {{serviceType}} experience with {{businessName}}? " +
-                        "Your feedback helps: {{reviewUrl}}";
+                return "{{businessName}}: How was your {{serviceType}} experience, {{customerName}}? " +
+                        "Share feedback: {{reviewUrl}} Reply STOP to opt out. {{supportContact}}";
             case "14_day":
-                return "{{customerName}}, we'd love your feedback on {{businessName}}'s {{serviceType}}. " +
-                        "Share here: {{reviewUrl}} Thank you!";
+                return "{{businessName}}: {{customerName}}, your {{serviceType}} feedback helps others. " +
+                        "Review: {{reviewUrl}} Reply STOP to opt out. {{supportContact}}";
             default:
-                return getReviewRequestTemplate();
+                return getComplianceReviewRequestTemplate();
         }
     }
 
     /**
-     * Create SMS-optimized variable map
+     * Create SMS-optimized variable map with compliance elements
      */
     private Map<String, String> createSmsVariableMap(Customer customer) {
         Map<String, String> variables = new HashMap<>();
         Business business = customer.getBusiness();
 
-        // Use shorter, SMS-friendly names
+        // Core customer info
         variables.put("customerName", getFirstName(customer.getName()));
         variables.put("businessName", shortenBusinessName(business.getName()));
         variables.put("serviceType", shortenServiceType(customer.getServiceType()));
         variables.put("serviceDate", formatDateForSms(customer.getServiceDate().toString()));
 
-        // Generate shortened review URL
+        // Review URL
         String reviewUrl = generateShortReviewUrl(customer);
         variables.put("reviewUrl", reviewUrl);
 
-        // Add business contact info (optional, for longer messages)
+        // COMPLIANCE: Support contact info
+        variables.put("supportContact", formatSupportContact(business));
+
+        // Business contact info (optional)
         variables.put("businessPhone", business.getPhone() != null ? business.getPhone() : "");
+        variables.put("businessWebsite", business.getWebsite() != null ? business.getWebsite() : "");
 
         return variables;
+    }
+
+    /**
+     * COMPLIANCE: Format support contact for SMS footer
+     */
+    private String formatSupportContact(Business business) {
+        // Use business phone if available, otherwise use support phone
+        String contactPhone = business.getPhone() != null ? business.getPhone() : supportPhone;
+        return "Help: " + contactPhone;
     }
 
     /**
@@ -121,7 +139,7 @@ public class SmsTemplateService {
     }
 
     /**
-     * Optimize message for SMS constraints
+     * COMPLIANCE: Optimize message for SMS constraints with mandatory disclosures
      */
     private String optimizeForSms(String message) {
         if (message == null) {
@@ -131,15 +149,20 @@ public class SmsTemplateService {
         // Remove extra whitespace
         message = message.replaceAll("\\s+", " ").trim();
 
+        // Ensure compliance elements are preserved
+        if (!message.contains("STOP")) {
+            message = addStopDisclosure(message);
+        }
+
         // Check if message fits in single SMS
         if (message.length() <= SMS_SINGLE_LIMIT) {
             return message;
         }
 
-        // If too long, try to shorten intelligently
+        // If too long for concatenated SMS, intelligently shorten
         if (message.length() > SMS_CONCAT_LIMIT) {
-            log.warn("SMS message too long ({} chars), applying aggressive shortening", message.length());
-            return shortenMessage(message);
+            log.warn("SMS message too long ({} chars), applying compliance-aware shortening", message.length());
+            return shortenComplianceMessage(message);
         }
 
         log.info("SMS message will be sent as concatenated message ({} chars)", message.length());
@@ -147,19 +170,96 @@ public class SmsTemplateService {
     }
 
     /**
-     * Shorten message aggressively if needed
+     * COMPLIANCE: Add STOP disclosure if missing
      */
-    private String shortenMessage(String message) {
-        // Remove optional parts and shorten
-        message = message.replaceAll("Reply STOP to opt out\\.", "");
-        message = message.replaceAll("\\s+", " ").trim();
+    private String addStopDisclosure(String message) {
+        if (message.length() + 20 <= SMS_SINGLE_LIMIT) {
+            return message + " Reply STOP to opt out.";
+        }
+        return message; // Can't fit, but other compliance checks will handle
+    }
 
-        // If still too long, truncate with ellipsis
-        if (message.length() > SMS_CONCAT_LIMIT - 3) {
-            return message.substring(0, SMS_CONCAT_LIMIT - 3) + "...";
+    /**
+     * COMPLIANCE: Shorten message while preserving mandatory compliance elements
+     */
+    private String shortenComplianceMessage(String message) {
+        // Extract and preserve compliance elements
+        String stopText = "Reply STOP to opt out";
+        String helpText = extractHelpContact(message);
+
+        // Calculate space available after compliance elements
+        int complianceLength = stopText.length() + (helpText != null ? helpText.length() + 1 : 0);
+        int availableLength = SMS_CONCAT_LIMIT - complianceLength - 10; // Buffer for periods and spaces
+
+        if (availableLength < 50) {
+            // Minimal message if very constrained
+            return createMinimalComplianceMessage(message);
         }
 
-        return message;
+        // Shorten the main content while keeping compliance
+        String mainContent = message;
+        mainContent = mainContent.replaceAll("Reply STOP.*", "").trim();
+
+        if (helpText != null) {
+            mainContent = mainContent.replace(helpText, "").trim();
+        }
+
+        if (mainContent.length() > availableLength) {
+            mainContent = mainContent.substring(0, availableLength - 3) + "...";
+        }
+
+        // Reassemble with compliance elements
+        StringBuilder result = new StringBuilder(mainContent);
+        result.append(" ").append(stopText).append(".");
+
+        if (helpText != null) {
+            result.append(" ").append(helpText);
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Extract help contact from message
+     */
+    private String extractHelpContact(String message) {
+        if (message.contains("Help:")) {
+            int helpIndex = message.indexOf("Help:");
+            int endIndex = message.length();
+            // Find end of help contact (usually end of message or before another sentence)
+            for (int i = helpIndex; i < message.length(); i++) {
+                if (message.charAt(i) == '.' && i + 1 < message.length() &&
+                        Character.isUpperCase(message.charAt(i + 1))) {
+                    endIndex = i + 1;
+                    break;
+                }
+            }
+            return message.substring(helpIndex, endIndex).trim();
+        }
+        return null;
+    }
+
+    /**
+     * Create minimal compliance message when severely space-constrained
+     */
+    private String createMinimalComplianceMessage(String originalMessage) {
+        // Extract business name and basic info
+        String businessName = extractBusinessName(originalMessage);
+        return businessName + " review: [link] Reply STOP to opt out. Help: " + supportPhone;
+    }
+
+    /**
+     * Extract business name from original message
+     */
+    private String extractBusinessName(String message) {
+        // Try to extract business name from the beginning of the message
+        if (message.contains(":")) {
+            String beforeColon = message.substring(0, message.indexOf(":")).trim();
+            if (beforeColon.length() < 30) { // Reasonable business name length
+                return beforeColon;
+            }
+        }
+        return businessName; // Fallback to configured business name
     }
 
     /**
@@ -167,12 +267,10 @@ public class SmsTemplateService {
      */
     private String generateShortReviewUrl(Customer customer) {
         try {
-            Business business = customer.getBusiness();
-
-            // Priority 1: Use private feedback URL (shorter and more direct)
+            // Use customer-specific feedback URL
             String baseUrl = "http://localhost:3000/feedback/" + customer.getId();
 
-            // For SMS, we can use a URL shortener in production
+            // In production, consider using a URL shortener service
             // For now, return the direct URL
             return baseUrl;
 
@@ -191,29 +289,36 @@ public class SmsTemplateService {
         }
 
         String[] parts = fullName.trim().split("\\s+");
-        return parts[0];
+        String firstName = parts[0];
+
+        // Truncate very long first names
+        if (firstName.length() > 12) {
+            firstName = firstName.substring(0, 12);
+        }
+
+        return firstName;
     }
 
     /**
-     * Shorten business name for SMS
+     * Shorten business name for SMS with compliance considerations
      */
     private String shortenBusinessName(String businessName) {
         if (businessName == null) {
-            return "us";
+            return this.businessName; // Use configured business name
         }
 
         // Remove common business suffixes to save space
         String shortened = businessName
-                .replaceAll("\\b(LLC|Inc|Corp|Company|Services|Service|Solutions)\\b", "")
+                .replaceAll("\\b(LLC|Inc|Corp|Company|Services|Service|Solutions|Ltd)\\b", "")
                 .replaceAll("\\s+", " ")
                 .trim();
 
-        // Limit to reasonable length for SMS
-        if (shortened.length() > 25) {
-            shortened = shortened.substring(0, 22) + "...";
+        // Limit to reasonable length for SMS sender identification
+        if (shortened.length() > 20) {
+            shortened = shortened.substring(0, 17) + "...";
         }
 
-        return shortened.isEmpty() ? businessName : shortened;
+        return shortened.isEmpty() ? this.businessName : shortened;
     }
 
     /**
@@ -229,9 +334,10 @@ public class SmsTemplateService {
                 .replaceAll("\\brepair\\b", "fix")
                 .replaceAll("\\binstallation\\b", "install")
                 .replaceAll("\\bmaintenance\\b", "maint")
-                .replaceAll("\\bconsultation\\b", "consult");
+                .replaceAll("\\bconsultation\\b", "consult")
+                .replaceAll("\\bappointment\\b", "appt");
 
-        return shortened.length() > 20 ? shortened.substring(0, 17) + "..." : shortened;
+        return shortened.length() > 25 ? shortened.substring(0, 22) + "..." : shortened;
     }
 
     /**
@@ -239,7 +345,6 @@ public class SmsTemplateService {
      */
     private String formatDateForSms(String dateString) {
         try {
-            // Convert "2025-01-15" to "Jan 15" for brevity
             String[] parts = dateString.split("-");
             if (parts.length >= 3) {
                 int month = Integer.parseInt(parts[1]);
@@ -254,51 +359,72 @@ public class SmsTemplateService {
     }
 
     /**
-     * Create fallback message if template processing fails
+     * COMPLIANCE: Create fallback message with all required disclosures
      */
-    private String createFallbackMessage(Customer customer) {
+    private String createComplianceFallbackMessage(Customer customer) {
         String firstName = getFirstName(customer.getName());
         String businessName = customer.getBusiness().getName();
         String reviewUrl = "http://localhost:3000/feedback/" + customer.getId();
 
-        return String.format("Hi %s! Thanks for choosing %s. Please share your experience: %s",
-                firstName, businessName, reviewUrl);
+        return String.format("%s: Hi %s! Please review your experience: %s Reply STOP to opt out. Help: %s",
+                shortenBusinessName(businessName), firstName, reviewUrl, supportPhone);
     }
 
     /**
-     * Create fallback follow-up message
+     * COMPLIANCE: Create fallback follow-up message with required disclosures
      */
-    private String createFallbackFollowUpMessage(Customer customer) {
+    private String createComplianceFollowUpFallbackMessage(Customer customer) {
         String firstName = getFirstName(customer.getName());
         String businessName = customer.getBusiness().getName();
         String reviewUrl = "http://localhost:3000/feedback/" + customer.getId();
 
-        return String.format("Hi %s! How was your experience with %s? Share feedback: %s",
-                firstName, businessName, reviewUrl);
+        return String.format("%s: Hi %s! Share your feedback: %s Reply STOP to opt out. Help: %s",
+                shortenBusinessName(businessName), firstName, reviewUrl, supportPhone);
     }
 
     /**
-     * Validate SMS message length and provide recommendations
+     * COMPLIANCE: Validate SMS message for compliance requirements
      */
-    public SmsValidationResult validateMessage(String message) {
-        if (message == null) {
-            return new SmsValidationResult(false, "Message cannot be null", 0, 0);
+    public SmsComplianceValidationResult validateCompliance(String message) {
+        if (message == null || message.trim().isEmpty()) {
+            return new SmsComplianceValidationResult(false, "Message cannot be empty", null);
         }
 
-        int length = message.length();
-        int estimatedSms = calculateSmsCount(message);
+        StringBuilder issues = new StringBuilder();
 
-        if (length <= SMS_SINGLE_LIMIT) {
-            return new SmsValidationResult(true, "Perfect! Fits in single SMS", length, 1);
-        } else if (length <= SMS_CONCAT_LIMIT) {
-            return new SmsValidationResult(true,
-                    String.format("Will be sent as %d concatenated messages", estimatedSms),
-                    length, estimatedSms);
-        } else {
-            return new SmsValidationResult(false,
-                    "Message too long. Consider shortening.",
-                    length, estimatedSms);
+        // Check for required STOP disclosure
+        if (!message.toUpperCase().contains("STOP")) {
+            issues.append("Missing STOP disclosure; ");
         }
+
+        // Check for business identification
+        if (!containsBusinessIdentification(message)) {
+            issues.append("Missing business identification; ");
+        }
+
+        // Check message length
+        if (message.length() > SMS_CONCAT_LIMIT) {
+            issues.append("Message exceeds SMS length limit; ");
+        }
+
+        // Check for support contact
+        if (!containsSupportContact(message)) {
+            issues.append("Missing support contact information; ");
+        }
+
+        boolean isCompliant = issues.length() == 0;
+        String issuesList = issues.length() > 0 ? issues.toString().replaceAll("; $", "") : null;
+
+        return new SmsComplianceValidationResult(isCompliant, issuesList, calculateSmsCount(message));
+    }
+
+    private boolean containsBusinessIdentification(String message) {
+        return message.contains(businessName) || message.contains(":");
+    }
+
+    private boolean containsSupportContact(String message) {
+        return message.contains("Help:") || message.contains(supportPhone) ||
+                message.matches(".*\\b\\d{3}-\\d{3}-\\d{4}\\b.*");
     }
 
     /**
@@ -308,30 +434,25 @@ public class SmsTemplateService {
         if (message.length() <= SMS_SINGLE_LIMIT) {
             return 1;
         }
-        // Concatenated SMS has 153 chars per segment (7 chars used for headers)
         return (int) Math.ceil((double) message.length() / 153);
     }
 
     /**
-     * SMS validation result
+     * SMS compliance validation result
      */
-    public static class SmsValidationResult {
-        private final boolean valid;
-        private final String message;
-        private final int characterCount;
-        private final int smsCount;
+    public static class SmsComplianceValidationResult {
+        private final boolean compliant;
+        private final String issues;
+        private final Integer smsCount;
 
-        public SmsValidationResult(boolean valid, String message, int characterCount, int smsCount) {
-            this.valid = valid;
-            this.message = message;
-            this.characterCount = characterCount;
+        public SmsComplianceValidationResult(boolean compliant, String issues, Integer smsCount) {
+            this.compliant = compliant;
+            this.issues = issues;
             this.smsCount = smsCount;
         }
 
-        // Getters
-        public boolean isValid() { return valid; }
-        public String getMessage() { return message; }
-        public int getCharacterCount() { return characterCount; }
-        public int getSmsCount() { return smsCount; }
+        public boolean isCompliant() { return compliant; }
+        public String getIssues() { return issues; }
+        public Integer getSmsCount() { return smsCount; }
     }
 }

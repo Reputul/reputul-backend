@@ -93,7 +93,7 @@ public class ReviewRequestService {
      */
     @Transactional
     public ReviewRequestDto sendSmsReviewRequest(User user, Long customerId) {
-        log.info("Sending SMS review request to customer {}", customerId);
+        log.info("Sending compliance SMS review request to customer {}", customerId);
 
         // Validate customer belongs to user's business
         Customer customer = customerRepository.findById(customerId)
@@ -103,13 +103,10 @@ public class ReviewRequestService {
             throw new RuntimeException("Access denied: Customer does not belong to your business");
         }
 
-        // Validate phone number
-        if (customer.getPhone() == null || customer.getPhone().trim().isEmpty()) {
-            throw new RuntimeException("Customer phone number is required for SMS delivery");
-        }
-
-        if (!smsService.isValidPhoneNumber(customer.getPhone())) {
-            throw new RuntimeException("Invalid phone number format");
+        // CRITICAL: Check SMS eligibility before proceeding
+        SmsService.SmsEligibilityResult eligibility = smsService.getSmsEligibility(customer);
+        if (!eligibility.isEligible()) {
+            throw new RuntimeException("SMS not allowed: " + eligibility.getReason());
         }
 
         Business business = customer.getBusiness();
@@ -126,7 +123,7 @@ public class ReviewRequestService {
                     .orElseThrow(() -> new RuntimeException("Failed to create default template"));
         }
 
-        // Generate SMS message using SMS template service
+        // Generate SMS message using SMS template service (compliance-aware)
         String smsMessage = smsTemplateService.generateReviewRequestMessage(customer);
         String reviewLink = "http://localhost:3000/feedback/" + customer.getId();
 
@@ -146,7 +143,7 @@ public class ReviewRequestService {
 
         reviewRequest = reviewRequestRepository.save(reviewRequest);
 
-        // Send SMS
+        // Send SMS using compliance-aware service
         SmsService.SmsResult smsResult = smsService.sendReviewRequestSms(customer);
 
         // Update status based on SMS send result
@@ -155,7 +152,7 @@ public class ReviewRequestService {
             reviewRequest.setSentAt(LocalDateTime.now());
             reviewRequest.setSmsMessageId(smsResult.getMessageSid());
             reviewRequest.setSmsStatus(smsResult.getStatus());
-            log.info("✅ SMS review request sent successfully to {} - SID: {}",
+            log.info("✅ Compliance SMS review request sent successfully to {} - SID: {}",
                     customer.getPhone(), smsResult.getMessageSid());
         } else {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);

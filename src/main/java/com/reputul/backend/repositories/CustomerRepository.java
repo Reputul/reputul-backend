@@ -9,32 +9,22 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 @Repository
 public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
-    // Find all customers by user
     List<Customer> findByUserOrderByCreatedAtDesc(User user);
-
-    // Find customers by business
     List<Customer> findByBusinessOrderByCreatedAtDesc(Business business);
-
-    // Find customers by user and business
     List<Customer> findByUserAndBusinessOrderByCreatedAtDesc(User user, Business business);
-
-    // Find customer by email and user (for duplicate checking)
     Optional<Customer> findByEmailAndUser(String email, User user);
-
-    // Find customers by status
     List<Customer> findByUserAndStatusOrderByCreatedAtDesc(User user, Customer.CustomerStatus status);
 
-    // Find customers by tag
     @Query("SELECT c FROM Customer c JOIN c.tags t WHERE c.user = :user AND t = :tag ORDER BY c.createdAt DESC")
     List<Customer> findByUserAndTagsContaining(@Param("user") User user, @Param("tag") Customer.CustomerTag tag);
 
-    // Search customers by name, email, or service type
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND " +
             "(LOWER(c.name) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
             "LOWER(c.email) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
@@ -42,24 +32,124 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
             "ORDER BY c.createdAt DESC")
     List<Customer> searchCustomers(@Param("user") User user, @Param("searchTerm") String searchTerm);
 
-    // Count customers by user
     long countByUser(User user);
-
-    // Count customers by user and status
     long countByUserAndStatus(User user, Customer.CustomerStatus status);
 
-    // Count customers by user and tag
     @Query("SELECT COUNT(c) FROM Customer c JOIN c.tags t WHERE c.user = :user AND t = :tag")
     long countByUserAndTag(@Param("user") User user, @Param("tag") Customer.CustomerTag tag);
 
-    // Find customers created this month
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND " +
             "YEAR(c.createdAt) = YEAR(CURRENT_DATE) AND " +
             "MONTH(c.createdAt) = MONTH(CURRENT_DATE) " +
             "ORDER BY c.createdAt DESC")
     List<Customer> findCustomersThisMonth(@Param("user") User user);
 
-    // Find customers by service date range
     List<Customer> findByUserAndServiceDateBetweenOrderByServiceDateDesc(
             User user, LocalDate startDate, LocalDate endDate);
+
+    // NEW SMS METHODS ONLY - No duplicates
+
+    /**
+     * Find customer by phone number (for inbound SMS processing)
+     */
+    Optional<Customer> findByPhone(String phone);
+
+    /**
+     * Find SMS-eligible customers by user
+     */
+    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE " +
+            "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
+            "AND c.phone != '' ORDER BY c.createdAt DESC")
+    List<Customer> findSmsEligibleByUser(@Param("user") User user);
+
+    /**
+     * Find SMS-eligible customers by business
+     */
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.smsOptIn = TRUE " +
+            "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
+            "AND c.phone != '' ORDER BY c.createdAt DESC")
+    List<Customer> findSmsEligibleByBusiness(@Param("business") Business business);
+
+    /**
+     * Find customers who opted out of SMS by user
+     */
+    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsOptOut = TRUE " +
+            "ORDER BY c.smsOptOutTimestamp DESC")
+    List<Customer> findSmsOptedOutByUser(@Param("user") User user);
+
+    /**
+     * Find customers needing SMS consent by user
+     */
+    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.phone IS NOT NULL " +
+            "AND c.phone != '' AND (c.smsOptIn IS NULL OR c.smsOptIn = FALSE) " +
+            "AND (c.smsOptOut IS NULL OR c.smsOptOut = FALSE) ORDER BY c.createdAt DESC")
+    List<Customer> findNeedingSmsConsentByUser(@Param("user") User user);
+
+    /**
+     * Count SMS-eligible customers by user
+     */
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE " +
+            "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
+            "AND c.phone != ''")
+    Long countSmsEligibleByUser(@Param("user") User user);
+
+    /**
+     * Count customers with phone numbers by user
+     */
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.phone IS NOT NULL AND c.phone != ''")
+    Long countWithPhoneByUser(@Param("user") User user);
+
+    /**
+     * Count customers who opted in to SMS by user
+     */
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE")
+    Long countOptedInByUser(@Param("user") User user);
+
+    /**
+     * Count customers who opted out of SMS by user
+     */
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptOut = TRUE")
+    Long countOptedOutByUser(@Param("user") User user);
+
+    /**
+     * Find customers with recent SMS activity
+     */
+    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsLastSentTimestamp >= :since " +
+            "ORDER BY c.smsLastSentTimestamp DESC")
+    List<Customer> findWithRecentSms(@Param("user") User user, @Param("since") LocalDateTime since);
+
+    /**
+     * Helper method for phone lookup with format variations
+     */
+    default Optional<Customer> findByPhoneAnyFormat(String incomingPhone) {
+        if (incomingPhone == null || incomingPhone.trim().isEmpty()) {
+            return Optional.empty();
+        }
+
+        String clean = incomingPhone.replaceAll("[^+\\d]", "");
+
+        // Try exact match first
+        Optional<Customer> customer = findByPhone(clean);
+        if (customer.isPresent()) return customer;
+
+        // Try with + prefix
+        if (!clean.startsWith("+")) {
+            customer = findByPhone("+" + clean);
+            if (customer.isPresent()) return customer;
+        }
+
+        // Try without + prefix
+        if (clean.startsWith("+")) {
+            customer = findByPhone(clean.substring(1));
+            if (customer.isPresent()) return customer;
+        }
+
+        // Try with US country code for 10-digit numbers
+        if (clean.length() == 10 && clean.matches("\\d{10}")) {
+            customer = findByPhone("+1" + clean);
+            if (customer.isPresent()) return customer;
+        }
+
+        return Optional.empty();
+    }
 }
