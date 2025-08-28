@@ -4,6 +4,7 @@ import com.reputul.backend.models.Business;
 import com.reputul.backend.models.Subscription;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.SubscriptionRepository;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -26,17 +27,19 @@ public class SubscriptionController {
         subscription.setBusiness(business);
         subscription.setStartDate(LocalDateTime.now());
         if (subscription.isTrial()) {
-            subscription.setStatus("trialing");
+            subscription.setStatus(Subscription.SubscriptionStatus.TRIALING);
             subscription.setEndDate(LocalDateTime.now().plusDays(14));
         } else {
-            subscription.setStatus("active");
+            subscription.setStatus(Subscription.SubscriptionStatus.ACTIVE);
             subscription.setRenewalDate(LocalDateTime.now().plusMonths(1));
         }
         return subscriptionRepo.save(subscription);
     }
 
     @GetMapping("/business/{businessId}")
-    public Subscription getByBusiness(@PathVariable Long businessId) {
-        return subscriptionRepo.findByBusinessId(businessId);
+    public ResponseEntity<Subscription> getByBusiness(@PathVariable Long businessId) {
+        return subscriptionRepo.findByBusinessId(businessId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 }

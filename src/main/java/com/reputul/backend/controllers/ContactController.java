@@ -1,4 +1,3 @@
-// ContactController.java
 package com.reputul.backend.controllers;
 
 import com.reputul.backend.dto.*;
@@ -320,12 +319,12 @@ public class ContactController {
 
     /**
      * Get the business ID for the authenticated user
-     * For now, returns the first business found for the user
-     * Can be enhanced later to support multiple businesses per user
+     * FIXED: Properly handle Optional<Business> return type
      */
     private Long getUserBusinessId(User user) {
-        Business business = businessRepository.findFirstByUserOrderByCreatedAtAsc(user);
-        return business != null ? business.getId() : null;
+        return businessRepository.findFirstByUserOrderByCreatedAtAsc(user)
+                .map(Business::getId)
+                .orElse(null);
     }
 
     /**
