@@ -1,7 +1,7 @@
 package com.reputul.backend.repositories;
 
-import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.Business;
+import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -16,8 +16,8 @@ import java.util.Optional;
 @Repository
 public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
+    // Methods used by CustomerService
     List<Customer> findByUserOrderByCreatedAtDesc(User user);
-    List<Customer> findByBusinessOrderByCreatedAtDesc(Business business);
     List<Customer> findByUserAndBusinessOrderByCreatedAtDesc(User user, Business business);
     Optional<Customer> findByEmailAndUser(String email, User user);
     List<Customer> findByUserAndStatusOrderByCreatedAtDesc(User user, Customer.CustomerStatus status);
@@ -47,73 +47,93 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     List<Customer> findByUserAndServiceDateBetweenOrderByServiceDateDesc(
             User user, LocalDate startDate, LocalDate endDate);
 
-    // NEW SMS METHODS ONLY - No duplicates
+    // Methods used by other services (Business-based queries)
+    List<Customer> findByBusiness(Business business);
+    List<Customer> findByBusinessOrderByCreatedAtDesc(Business business);
+    long countByBusiness(Business business);
+    Optional<Customer> findByBusinessAndEmail(Business business, String email);
+    Optional<Customer> findByBusinessAndPhone(Business business, String phone);
+    boolean existsByBusinessAndEmail(Business business, String email);
+    boolean existsByBusinessAndPhone(Business business, String phone);
 
-    /**
-     * Find customer by phone number (for inbound SMS processing)
-     */
+    List<Customer> findByBusinessAndCreatedAtBetween(Business business, LocalDateTime startDate, LocalDateTime endDate);
+    long countByBusinessAndCreatedAtBetween(Business business, LocalDateTime startDate, LocalDateTime endDate);
+
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND LOWER(c.name) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
+    List<Customer> findByBusinessAndNameContainingIgnoreCase(@Param("business") Business business, @Param("searchTerm") String searchTerm);
+
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND LOWER(c.email) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
+    List<Customer> findByBusinessAndEmailContainingIgnoreCase(@Param("business") Business business, @Param("searchTerm") String searchTerm);
+
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.phone IS NOT NULL AND c.phone != ''")
+    List<Customer> findByBusinessWithPhone(@Param("business") Business business);
+
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.business = :business AND c.phone IS NOT NULL AND c.phone != ''")
+    long countByBusinessWithPhone(@Param("business") Business business);
+
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.email IS NOT NULL AND c.email != ''")
+    List<Customer> findByBusinessWithEmail(@Param("business") Business business);
+
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.business = :business AND c.email IS NOT NULL AND c.email != ''")
+    long countByBusinessWithEmail(@Param("business") Business business);
+
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.createdAt >= :sinceDate ORDER BY c.createdAt DESC")
+    List<Customer> findRecentCustomers(@Param("business") Business business, @Param("sinceDate") LocalDateTime sinceDate);
+
+    @Query("SELECT " +
+            "COUNT(c) as totalCustomers, " +
+            "SUM(CASE WHEN c.email IS NOT NULL AND c.email != '' THEN 1 ELSE 0 END) as withEmail, " +
+            "SUM(CASE WHEN c.phone IS NOT NULL AND c.phone != '' THEN 1 ELSE 0 END) as withPhone " +
+            "FROM Customer c WHERE c.business = :business")
+    Object[] getCustomerStatsByBusiness(@Param("business") Business business);
+
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.phone LIKE CONCAT('%', :phoneDigits, '%')")
+    List<Customer> findByBusinessAndPhoneContaining(@Param("business") Business business, @Param("phoneDigits") String phoneDigits);
+
+    void deleteByBusinessAndCreatedAtBefore(Business business, LocalDateTime cutoffDate);
+
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND NOT EXISTS (SELECT r FROM ReviewRequest r WHERE r.customer = c)")
+    List<Customer> findCustomersWithoutReviewRequests(@Param("business") Business business);
+
+    @Query("SELECT DISTINCT c FROM Customer c JOIN ReviewRequest r ON r.customer = c WHERE c.business = :business AND r.status = 'SENT'")
+    List<Customer> findCustomersWithActiveRequests(@Param("business") Business business);
+
+    // SMS-related methods
     Optional<Customer> findByPhone(String phone);
 
-    /**
-     * Find SMS-eligible customers by user
-     */
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE " +
             "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
             "AND c.phone != '' ORDER BY c.createdAt DESC")
     List<Customer> findSmsEligibleByUser(@Param("user") User user);
 
-    /**
-     * Find SMS-eligible customers by business
-     */
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.smsOptIn = TRUE " +
             "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
             "AND c.phone != '' ORDER BY c.createdAt DESC")
     List<Customer> findSmsEligibleByBusiness(@Param("business") Business business);
 
-    /**
-     * Find customers who opted out of SMS by user
-     */
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsOptOut = TRUE " +
             "ORDER BY c.smsOptOutTimestamp DESC")
     List<Customer> findSmsOptedOutByUser(@Param("user") User user);
 
-    /**
-     * Find customers needing SMS consent by user
-     */
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.phone IS NOT NULL " +
             "AND c.phone != '' AND (c.smsOptIn IS NULL OR c.smsOptIn = FALSE) " +
             "AND (c.smsOptOut IS NULL OR c.smsOptOut = FALSE) ORDER BY c.createdAt DESC")
     List<Customer> findNeedingSmsConsentByUser(@Param("user") User user);
 
-    /**
-     * Count SMS-eligible customers by user
-     */
     @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE " +
             "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
             "AND c.phone != ''")
     Long countSmsEligibleByUser(@Param("user") User user);
 
-    /**
-     * Count customers with phone numbers by user
-     */
     @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.phone IS NOT NULL AND c.phone != ''")
     Long countWithPhoneByUser(@Param("user") User user);
 
-    /**
-     * Count customers who opted in to SMS by user
-     */
     @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE")
     Long countOptedInByUser(@Param("user") User user);
 
-    /**
-     * Count customers who opted out of SMS by user
-     */
     @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptOut = TRUE")
     Long countOptedOutByUser(@Param("user") User user);
 
-    /**
-     * Find customers with recent SMS activity
-     */
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsLastSentTimestamp >= :since " +
             "ORDER BY c.smsLastSentTimestamp DESC")
     List<Customer> findWithRecentSms(@Param("user") User user, @Param("since") LocalDateTime since);

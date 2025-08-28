@@ -1,16 +1,19 @@
 package com.reputul.backend.dto;
 
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class SendReviewRequestDto {
+
     private Long customerId;
     private Long templateId;
-    private String notes; // Optional notes for this specific request
+    private String deliveryMethod; // EMAIL or SMS
+    private String notes;
+    private String customMessage;
 }

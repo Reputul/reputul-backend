@@ -30,7 +30,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             "/api/reviews/public/",
             "/api/customers/",
             "/api/waitlist/",
-            "/api/review-requests/send-direct"
+            "/api/review-requests/send-direct",
+            "/api/billing/webhook/",  // Add webhook paths
+            "/api/webhooks/"           // Add webhook paths
     );
 
     public JwtAuthFilter(JwtUtil jwtUtil, UserAuthService userAuthService) {
@@ -43,6 +45,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
+
+        // Skip JWT processing for public paths
+        if (isPublicPath(request.getRequestURI())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         final String authHeader = request.getHeader("Authorization");
         final String jwt;
@@ -74,7 +82,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             // Log the error but don't block the request - let Spring Security handle it
             System.err.println("JWT Authentication error: " + e.getMessage());
-            // Don't return here - continue to filterChain.doFilter()
         }
 
         filterChain.doFilter(request, response);

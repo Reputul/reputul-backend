@@ -43,23 +43,25 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
-                .cors(Customizer.withDefaults()) // This is correct - uses WebConfig CORS settings
+                .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(auth -> auth
-                        // Public endpoints - no authentication required
-                        .requestMatchers(
-                                "/api/health",
-                                "/api/auth/**",
-                                "/api/public/**",
-                                "/api/reviews/business/**",
-                                "/api/reviews/public/**",
-                                "/api/customers/**",
-                                "/api/waitlist/**",
-                                "/api/review-requests/send-direct"
-                        ).permitAll()
-                        // All other endpoints require authentication
-                        .anyRequest().authenticated()
-                )
+                .authorizeHttpRequests(auth -> {
+                    System.out.println("Configuring security rules...");
+                    auth
+                            .requestMatchers("/api/billing/webhook/**").permitAll()
+                            .requestMatchers("/api/webhooks/**").permitAll()
+                            .requestMatchers(
+                                    "/api/health",
+                                    "/api/auth/**",
+                                    "/api/public/**",
+                                    "/api/reviews/business/**",
+                                    "/api/reviews/public/**",
+                                    "/api/customers/**",
+                                    "/api/waitlist/**",
+                                    "/api/review-requests/send-direct"
+                            ).permitAll()
+                            .anyRequest().authenticated();
+                })
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();

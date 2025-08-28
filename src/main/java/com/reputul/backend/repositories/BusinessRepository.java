@@ -18,7 +18,8 @@ public interface BusinessRepository extends JpaRepository<Business, Long> {
     // Find all businesses for a specific owner
     List<Business> findByUser(User user);
 
-    Business findFirstByUserOrderByCreatedAtAsc(User user);
+    // FIXED: This method now returns Optional<Business> instead of Business
+    Optional<Business> findFirstByUserOrderByCreatedAtAsc(User user);
 
     // Check if business exists and belongs to user
     boolean existsByIdAndUser(Long id, User user);
@@ -71,4 +72,26 @@ public interface BusinessRepository extends JpaRepository<Business, Long> {
      * Useful if you want location-based searching
      */
     List<Business> findByAddressContainingIgnoreCase(String location);
+
+    // Additional methods to work with your Business model structure
+
+    /**
+     * Find businesses with Google Places integration
+     */
+    List<Business> findByUserAndGooglePlaceIdIsNotNull(User user);
+
+    /**
+     * Find business by Google Place ID
+     */
+    Optional<Business> findByGooglePlaceId(String googlePlaceId);
+
+    /**
+     * Find businesses with platform URLs configured
+     */
+    List<Business> findByUserAndYelpPageUrlIsNotNullOrFacebookPageUrlIsNotNull(User user);
+
+    /**
+     * Find businesses by reputation score range
+     */
+    List<Business> findByUserAndReputationScoreBetween(User user, Double minScore, Double maxScore);
 }
