@@ -6,7 +6,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import jakarta.persistence.*;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Entity
@@ -50,7 +51,7 @@ public class Customer {
 
     // Existing feedback tracking fields
     @Column(name = "last_feedback_date")
-    private LocalDateTime lastFeedbackDate;
+    private OffsetDateTime lastFeedbackDate;
 
     @Column(name = "feedback_count")
     @Builder.Default
@@ -70,7 +71,7 @@ public class Customer {
     private SmsOptInMethod smsOptInMethod;
 
     @Column(name = "sms_opt_in_timestamp")
-    private LocalDateTime smsOptInTimestamp;
+    private OffsetDateTime smsOptInTimestamp;
 
     @Column(name = "sms_opt_in_source")
     private String smsOptInSource; // e.g., "web_form", "phone_call", "import"
@@ -80,14 +81,14 @@ public class Customer {
     private Boolean smsOptOut = false;
 
     @Column(name = "sms_opt_out_timestamp")
-    private LocalDateTime smsOptOutTimestamp;
+    private OffsetDateTime smsOptOutTimestamp;
 
     @Column(name = "sms_opt_out_method")
     @Enumerated(EnumType.STRING)
     private SmsOptOutMethod smsOptOutMethod;
 
     @Column(name = "sms_last_sent_timestamp")
-    private LocalDateTime smsLastSentTimestamp;
+    private OffsetDateTime smsLastSentTimestamp;
 
     @Column(name = "sms_send_count_today")
     @Builder.Default
@@ -106,14 +107,14 @@ public class Customer {
     private User user;
 
     @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = OffsetDateTime.now();
         if (feedbackCount == null) {
             feedbackCount = 0;
         }
@@ -133,7 +134,7 @@ public class Customer {
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = OffsetDateTime.now();
     }
 
     // SMS Compliance Methods
@@ -148,7 +149,7 @@ public class Customer {
     public void recordSmsOptIn(SmsOptInMethod method, String source) {
         this.smsOptIn = true;
         this.smsOptInMethod = method;
-        this.smsOptInTimestamp = LocalDateTime.now();
+        this.smsOptInTimestamp = OffsetDateTime.now();
         this.smsOptInSource = source;
         // Clear any previous opt-out
         this.smsOptOut = false;
@@ -158,7 +159,7 @@ public class Customer {
 
     public void recordSmsOptOut(SmsOptOutMethod method) {
         this.smsOptOut = true;
-        this.smsOptOutTimestamp = LocalDateTime.now();
+        this.smsOptOutTimestamp = OffsetDateTime.now();
         this.smsOptOutMethod = method;
     }
 
@@ -172,7 +173,7 @@ public class Customer {
         }
 
         smsSendCountToday++;
-        smsLastSentTimestamp = LocalDateTime.now();
+        smsLastSentTimestamp = OffsetDateTime.now();
     }
 
     public boolean hasReachedDailySmsLimit(int dailyLimit) {

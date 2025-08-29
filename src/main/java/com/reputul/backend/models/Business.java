@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
-
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 @Entity
 @Table(name = "businesses")
 @Data
@@ -23,7 +23,8 @@ public class Business {
     private String address;
     private Double reputationScore;
     private String badge;
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
+    private OffsetDateTime updatedAt;
     private String googlePlaceId;
     private String facebookPageUrl;
     private String yelpPageUrl;
@@ -45,6 +46,6 @@ public class Business {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 }

@@ -3,7 +3,8 @@ package com.reputul.backend.models;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "subscriptions")
@@ -41,17 +42,17 @@ public class Subscription {
 
     // Billing Period
     @Column(name = "current_period_start")
-    private LocalDateTime currentPeriodStart;
+    private OffsetDateTime currentPeriodStart;
 
     @Column(name = "current_period_end")
-    private LocalDateTime currentPeriodEnd;
+    private OffsetDateTime currentPeriodEnd;
 
     // Trial Support
     @Column(name = "trial_start")
-    private LocalDateTime trialStart;
+    private OffsetDateTime trialStart;
 
     @Column(name = "trial_end")
-    private LocalDateTime trialEnd;
+    private OffsetDateTime trialEnd;
 
     // Promo Code Tracking
     @Column(name = "promo_code")
@@ -65,15 +66,15 @@ public class Subscription {
     private Integer promoPhase; // 1 = free phase, 2 = discount phase
 
     @Column(name = "promo_starts_at")
-    private LocalDateTime promoStartsAt;
+    private OffsetDateTime promoStartsAt;
 
     @Column(name = "promo_ends_at")
-    private LocalDateTime promoEndsAt;
+    private OffsetDateTime promoEndsAt;
 
     // Legacy fields (keeping for backward compatibility)
-    private LocalDateTime startDate;
-    private LocalDateTime endDate;
-    private LocalDateTime renewalDate;
+    private OffsetDateTime startDate;
+    private OffsetDateTime endDate;
+    private OffsetDateTime renewalDate;
     @Builder.Default
     private boolean trial = false;
 
@@ -83,19 +84,19 @@ public class Subscription {
     private Business business;
 
     @Column(name = "created_at")
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     // Enums

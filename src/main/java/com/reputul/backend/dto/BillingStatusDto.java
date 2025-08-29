@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Map;
 
 @Data
@@ -19,9 +19,9 @@ public class BillingStatusDto {
     private boolean hasActiveSubscription;
     private String plan;
     private String status;
-    private LocalDateTime currentPeriodStart;
-    private LocalDateTime currentPeriodEnd;
-    private LocalDateTime trialEnd;
+    private OffsetDateTime currentPeriodStart;
+    private OffsetDateTime currentPeriodEnd;
+    private OffsetDateTime trialEnd;
 
     // Promo info
     private PromoInfoDto promo;
@@ -41,7 +41,7 @@ public class BillingStatusDto {
         private String code;
         private String description;
         private Integer phase;
-        private LocalDateTime endsAt;
+        private OffsetDateTime endsAt;
         private boolean isInFreePhase;
         private boolean isInDiscountPhase;
     }

@@ -15,11 +15,11 @@ import java.util.Optional;
 @Repository
 public interface ContactRepository extends JpaRepository<Contact, Long> {
 
-    // Find all contacts for a business with optional filtering
+    // All contacts for a business (JPQL against the Contact entity)
     @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId")
     Page<Contact> findByBusinessId(@Param("businessId") Long businessId, Pageable pageable);
 
-    // Search contacts by name, email, or phone within business
+    // Text search by name/email/phone (JPQL)
     @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId AND " +
             "(LOWER(c.name) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
             "LOWER(COALESCE(c.email, '')) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
@@ -28,29 +28,66 @@ public interface ContactRepository extends JpaRepository<Contact, Long> {
                                            @Param("query") String query,
                                            Pageable pageable);
 
-    // Find contacts with specific tag (simplified approach)
-    @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId AND " +
-            "c.tagsJson IS NOT NULL AND c.tagsJson LIKE CONCAT('%\"', LOWER(:tag), '\"%')")
+    // Tag filter only (native SQL; uses JSONB operator and can leverage GIN index)
+    @Query(
+            // language=PostgreSQL
+            value = """
+                SELECT *
+                FROM public.contacts c
+                WHERE c.business_id = :businessId
+                  AND c.tags_json @> to_jsonb(ARRAY[lower(:tag)])
+                """,
+            // language=PostgreSQL
+            countQuery = """
+                SELECT COUNT(*)
+                FROM public.contacts c
+                WHERE c.business_id = :businessId
+                  AND c.tags_json @> to_jsonb(ARRAY[lower(:tag)])
+                """,
+            nativeQuery = true
+    )
     Page<Contact> findByBusinessIdAndTag(@Param("businessId") Long businessId,
                                          @Param("tag") String tag,
                                          Pageable pageable);
 
-    // Search with both query and tag filter
-    @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId AND " +
-            "(LOWER(c.name) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
-            "LOWER(COALESCE(c.email, '')) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
-            "COALESCE(c.phone, '') LIKE CONCAT('%', :query, '%')) AND " +
-            "c.tagsJson IS NOT NULL AND c.tagsJson LIKE CONCAT('%\"', LOWER(:tag), '\"%')")
+    // Text search + tag filter (native SQL)
+    @Query(
+            // language=PostgreSQL
+            value = """
+                SELECT *
+                FROM public.contacts c
+                WHERE c.business_id = :businessId
+                  AND (
+                        lower(c.name) LIKE lower(CONCAT('%', :query, '%'))
+                        OR lower(coalesce(c.email, '')) LIKE lower(CONCAT('%', :query, '%'))
+                        OR coalesce(c.phone, '') LIKE CONCAT('%', :query, '%')
+                      )
+                  AND c.tags_json @> to_jsonb(ARRAY[lower(:tag)])
+                """,
+            // language=PostgreSQL
+            countQuery = """
+                SELECT COUNT(*)
+                FROM public.contacts c
+                WHERE c.business_id = :businessId
+                  AND (
+                        lower(c.name) LIKE lower(CONCAT('%', :query, '%'))
+                        OR lower(coalesce(c.email, '')) LIKE lower(CONCAT('%', :query, '%'))
+                        OR coalesce(c.phone, '') LIKE CONCAT('%', :query, '%')
+                      )
+                  AND c.tags_json @> to_jsonb(ARRAY[lower(:tag)])
+                """,
+            nativeQuery = true
+    )
     Page<Contact> findByBusinessIdAndQueryAndTag(@Param("businessId") Long businessId,
                                                  @Param("query") String query,
                                                  @Param("tag") String tag,
                                                  Pageable pageable);
 
-    // Find by unique constraints for deduplication
+    // Dedup helpers (derived queries)
     Optional<Contact> findByBusinessIdAndEmail(@Param("businessId") Long businessId, @Param("email") String email);
-
     Optional<Contact> findByBusinessIdAndPhone(@Param("businessId") Long businessId, @Param("phone") String phone);
 
+    // Date range by name (JPQL)
     @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId AND c.name = :name AND " +
             "c.lastJobDate BETWEEN :startDate AND :endDate")
     List<Contact> findByBusinessIdAndNameAndLastJobDateBetween(@Param("businessId") Long businessId,
@@ -58,19 +95,26 @@ public interface ContactRepository extends JpaRepository<Contact, Long> {
                                                                @Param("startDate") LocalDate startDate,
                                                                @Param("endDate") LocalDate endDate);
 
-    // Count contacts for business
+    // Count by business (derived)
     long countByBusinessId(Long businessId);
 
-    // Export query - get all contacts for a business with optional tag filter
     @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId ORDER BY c.createdAt DESC")
     List<Contact> findAllByBusinessIdForExport(@Param("businessId") Long businessId);
 
-    @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId AND " +
-            "c.tagsJson IS NOT NULL AND c.tagsJson LIKE CONCAT('%\"', LOWER(:tag), '\"%') " +
-            "ORDER BY c.createdAt DESC")
+    // Export with tag (native SQL for JSONB)
+    @Query(
+            value = """
+                SELECT *
+                FROM public.contacts c
+                WHERE c.business_id = :businessId
+                  AND c.tags_json @> to_jsonb(ARRAY[lower(:tag)])
+                ORDER BY c.created_at DESC
+                """,
+            nativeQuery = true
+    )
     List<Contact> findAllByBusinessIdAndTagForExport(@Param("businessId") Long businessId, @Param("tag") String tag);
 
-    // Batch operations for import
+    // Batch lookups (JPQL)
     @Query("SELECT c FROM Contact c WHERE c.businessId = :businessId AND c.email IN :emails")
     List<Contact> findByBusinessIdAndEmailIn(@Param("businessId") Long businessId, @Param("emails") List<String> emails);
 

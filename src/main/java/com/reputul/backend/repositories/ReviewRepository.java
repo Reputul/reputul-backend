@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -178,7 +178,7 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     @Query("SELECT r FROM Review r WHERE r.business.id = :businessId AND r.createdAt >= :sinceDate ORDER BY r.createdAt DESC")
     List<Review> findByBusinessIdAndCreatedAtAfterOrderByCreatedAtDesc(
             @Param("businessId") Long businessId,
-            @Param("sinceDate") LocalDateTime sinceDate
+            @Param("sinceDate") OffsetDateTime sinceDate
     );
 
     // ================================================================

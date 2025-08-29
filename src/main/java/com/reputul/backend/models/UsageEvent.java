@@ -3,7 +3,8 @@ package com.reputul.backend.models;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "usage_events", indexes = {
@@ -30,7 +31,7 @@ public class UsageEvent {
     private UsageType usageType;
 
     @Column(name = "occurred_at", nullable = false)
-    private LocalDateTime occurredAt;
+    private OffsetDateTime occurredAt;
 
     @Column(name = "request_id", unique = true, nullable = false)
     private String requestId; // For idempotency (UUID)
@@ -44,23 +45,23 @@ public class UsageEvent {
 
     // Billing period this event belongs to
     @Column(name = "billing_period_start")
-    private LocalDateTime billingPeriodStart;
+    private OffsetDateTime billingPeriodStart;
 
     @Column(name = "billing_period_end")
-    private LocalDateTime billingPeriodEnd;
+    private OffsetDateTime billingPeriodEnd;
 
     // Additional metadata stored as JSON
     @Column(name = "metadata", columnDefinition = "JSON")
     private String metadata;
 
     @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
         if (occurredAt == null) {
-            occurredAt = LocalDateTime.now();
+            occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
         }
         if (overageBilled == null) {
             overageBilled = false;

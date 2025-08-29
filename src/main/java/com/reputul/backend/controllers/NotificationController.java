@@ -6,7 +6,8 @@ import com.reputul.backend.repositories.NotificationRepository;
 import com.reputul.backend.repositories.UserRepository;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @RestController
@@ -25,7 +26,7 @@ public class NotificationController {
     public Notification create(@PathVariable Long userId, @RequestBody Notification notification) {
         User user = userRepo.findById(userId).orElseThrow();
         notification.setUser(user);
-        notification.setCreatedAt(LocalDateTime.now());
+        notification.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         notification.setRead(false);
         return notificationRepo.save(notification);
     }

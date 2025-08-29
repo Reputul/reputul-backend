@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,42 +18,42 @@ public interface UsageEventRepository extends JpaRepository<UsageEvent, Long> {
     int countByBusinessAndUsageTypeAndOccurredAtBetween(
             Business business,
             UsageEvent.UsageType usageType,
-            LocalDateTime start,
-            LocalDateTime end);
+            OffsetDateTime start,
+            OffsetDateTime end);
 
     int countByBusinessAndUsageTypeInAndOccurredAtBetween(
             Business business,
             List<UsageEvent.UsageType> usageTypes,
-            LocalDateTime start,
-            LocalDateTime end);
+            OffsetDateTime start,
+            OffsetDateTime end);
 
     List<UsageEvent> findByBusinessAndUsageTypeAndBillingPeriodStartAndBillingPeriodEndOrderByOccurredAtDesc(
             Business business,
             UsageEvent.UsageType usageType,
-            LocalDateTime periodStart,
-            LocalDateTime periodEnd);
+            OffsetDateTime periodStart,
+            OffsetDateTime periodEnd);
 
-    @Query("""
-        SELECT 
-            DATE_FORMAT(ue.occurredAt, '%Y-%m') as month,
-            SUM(CASE WHEN ue.usageType = 'SMS_REVIEW_REQUEST_SENT' THEN 1 ELSE 0 END) as smsSent,
-            SUM(CASE WHEN ue.usageType = 'EMAIL_REVIEW_REQUEST_SENT' THEN 1 ELSE 0 END) as emailSent
-        FROM UsageEvent ue 
-        WHERE ue.business.id = :businessId 
-        AND ue.occurredAt BETWEEN :startDate AND :endDate
-        GROUP BY DATE_FORMAT(ue.occurredAt, '%Y-%m')
-        ORDER BY month DESC
-        """)
+    @Query(value = """
+    SELECT 
+        TO_CHAR(ue.occurred_at, 'YYYY-MM') as month,
+        SUM(CASE WHEN ue.usage_type = 'SMS_REVIEW_REQUEST_SENT' THEN 1 ELSE 0 END) as smsSent,
+        SUM(CASE WHEN ue.usage_type = 'EMAIL_REVIEW_REQUEST_SENT' THEN 1 ELSE 0 END) as emailSent
+    FROM usage_events ue 
+    WHERE ue.business_id = :businessId 
+    AND ue.occurred_at BETWEEN :startDate AND :endDate
+    GROUP BY TO_CHAR(ue.occurred_at, 'YYYY-MM')
+    ORDER BY TO_CHAR(ue.occurred_at, 'YYYY-MM') DESC
+    """, nativeQuery = true)
     List<Object[]> findMonthlyUsageByBusiness(
             @Param("businessId") Long businessId,
-            @Param("startDate") LocalDateTime startDate,
-            @Param("endDate") LocalDateTime endDate);
+            @Param("startDate") OffsetDateTime startDate,
+            @Param("endDate") OffsetDateTime endDate);
 
     boolean existsByRequestId(String requestId);
 
     List<UsageEvent> findByBusinessAndOccurredAtBetweenOrderByOccurredAtDesc(
             Business business,
-            LocalDateTime start,
-            LocalDateTime end);
+            OffsetDateTime start,
+            OffsetDateTime end);
 }
 

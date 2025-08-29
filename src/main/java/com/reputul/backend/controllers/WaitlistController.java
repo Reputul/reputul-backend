@@ -10,7 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Random;
 
 @RestController
@@ -35,7 +36,7 @@ public class WaitlistController {
                         .success(true)
                         .message(ckResponse.getMessage())
                         .waitlistCount(getRealisticWaitlistCount())
-                        .timestamp(LocalDateTime.now())
+                        .timestamp(OffsetDateTime.now(ZoneOffset.UTC))
                         .build();
 
                 log.info("Successfully added {} to waitlist", request.getEmail());
@@ -47,7 +48,7 @@ public class WaitlistController {
                         .message(ckResponse.getMessage())
                         .duplicate(true)
                         .waitlistCount(getRealisticWaitlistCount())
-                        .timestamp(LocalDateTime.now())
+                        .timestamp(OffsetDateTime.now(ZoneOffset.UTC))
                         .build();
 
                 log.info("Duplicate email attempt: {}", request.getEmail());
@@ -57,7 +58,7 @@ public class WaitlistController {
                 WaitlistResponse response = WaitlistResponse.builder()
                         .success(false)
                         .message(ckResponse.getMessage())
-                        .timestamp(LocalDateTime.now())
+                        .timestamp(OffsetDateTime.now(ZoneOffset.UTC))
                         .build();
 
                 log.error("Failed to add {} to ConvertKit: {}", request.getEmail(), ckResponse.getMessage());
@@ -70,7 +71,7 @@ public class WaitlistController {
             WaitlistResponse response = WaitlistResponse.builder()
                     .success(false)
                     .message("Something went wrong. Please try again later.")
-                    .timestamp(LocalDateTime.now())
+                    .timestamp(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
@@ -81,7 +82,7 @@ public class WaitlistController {
     public ResponseEntity<WaitlistCountResponse> getWaitlistCount() {
         WaitlistCountResponse response = WaitlistCountResponse.builder()
                 .count(getRealisticWaitlistCount())
-                .timestamp(LocalDateTime.now())
+                .timestamp(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
 
         return ResponseEntity.ok(response);
@@ -96,8 +97,8 @@ public class WaitlistController {
         int baseCount = 2847;
 
         // Calculate days since launch (adjust this date to your actual launch)
-        LocalDateTime launchDate = LocalDateTime.of(2024, 12, 1, 0, 0); // Adjust this
-        LocalDateTime now = LocalDateTime.now();
+        OffsetDateTime launchDate = OffsetDateTime.of(2024, 12, 1, 0, 0, 0, 0, ZoneOffset.UTC); // Adjust this
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         long daysSinceLaunch = java.time.Duration.between(launchDate, now).toDays();
 
         // Realistic growth: 3-8 signups per day with some variation
@@ -132,6 +133,6 @@ public class WaitlistController {
     @lombok.Builder
     public static class WaitlistCountResponse {
         private int count;
-        private LocalDateTime timestamp;
+        private OffsetDateTime timestamp;
     }
 }

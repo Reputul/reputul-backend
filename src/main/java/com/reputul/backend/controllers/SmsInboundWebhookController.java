@@ -11,7 +11,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -268,7 +269,7 @@ public class SmsInboundWebhookController {
         return ResponseEntity.ok(Map.of(
                 "status", "healthy",
                 "service", "sms-inbound-webhook",
-                "timestamp", LocalDateTime.now(),
+                "timestamp", OffsetDateTime.now(ZoneOffset.UTC),
                 "supportedKeywords", new String[]{"STOP", "START", "HELP"}
         ));
     }

@@ -6,7 +6,8 @@ import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "review_requests")
@@ -62,22 +63,22 @@ public class ReviewRequest {
     private RequestStatus status = RequestStatus.PENDING;
 
     @Column(name = "sent_at")
-    private LocalDateTime sentAt;
+    private OffsetDateTime sentAt;
 
     @Column(name = "opened_at")
-    private LocalDateTime openedAt;
+    private OffsetDateTime openedAt;
 
     @Column(name = "clicked_at")
-    private LocalDateTime clickedAt;
+    private OffsetDateTime clickedAt;
 
     @Column(name = "reviewed_at")
-    private LocalDateTime reviewedAt;
+    private OffsetDateTime reviewedAt;
 
     @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     @Column(name = "error_message")
     private String errorMessage;
@@ -94,12 +95,12 @@ public class ReviewRequest {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     // NEW: Delivery method enum

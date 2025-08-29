@@ -7,7 +7,8 @@ import com.reputul.backend.repositories.SubscriptionRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @RestController
 @RequestMapping("/api/subscriptions")
@@ -25,13 +26,13 @@ public class SubscriptionController {
     public Subscription createOrUpdate(@PathVariable Long businessId, @RequestBody Subscription subscription) {
         Business business = businessRepo.findById(businessId).orElseThrow();
         subscription.setBusiness(business);
-        subscription.setStartDate(LocalDateTime.now());
+        subscription.setStartDate(OffsetDateTime.now(ZoneOffset.UTC));
         if (subscription.isTrial()) {
             subscription.setStatus(Subscription.SubscriptionStatus.TRIALING);
-            subscription.setEndDate(LocalDateTime.now().plusDays(14));
+            subscription.setEndDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(14));
         } else {
             subscription.setStatus(Subscription.SubscriptionStatus.ACTIVE);
-            subscription.setRenewalDate(LocalDateTime.now().plusMonths(1));
+            subscription.setRenewalDate(OffsetDateTime.now(ZoneOffset.UTC).plusMonths(1));
         }
         return subscriptionRepo.save(subscription);
     }

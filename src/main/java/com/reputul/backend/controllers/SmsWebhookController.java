@@ -8,7 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 
@@ -128,7 +129,7 @@ public class SmsWebhookController {
                 if (reviewRequest.getStatus() == ReviewRequest.RequestStatus.PENDING) {
                     reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
                     if (reviewRequest.getSentAt() == null) {
-                        reviewRequest.setSentAt(LocalDateTime.now());
+                        reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
                     }
                 }
                 break;
@@ -147,7 +148,7 @@ public class SmsWebhookController {
 
             case "read":
                 // Some carriers provide read receipts
-                reviewRequest.setOpenedAt(LocalDateTime.now());
+                reviewRequest.setOpenedAt(OffsetDateTime.now(ZoneOffset.UTC));
                 if (reviewRequest.getStatus() != ReviewRequest.RequestStatus.CLICKED &&
                         reviewRequest.getStatus() != ReviewRequest.RequestStatus.COMPLETED) {
                     reviewRequest.setStatus(ReviewRequest.RequestStatus.OPENED);
@@ -179,7 +180,7 @@ public class SmsWebhookController {
         return ResponseEntity.ok(Map.of(
                 "status", "healthy",
                 "service", "sms-webhook",
-                "timestamp", LocalDateTime.now()
+                "timestamp", OffsetDateTime.now(ZoneOffset.UTC)
         ));
     }
 

@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 @Builder
@@ -18,10 +18,10 @@ public class UsageEventDto {
     private Long businessId;
     private String businessName;
     private UsageEvent.UsageType usageType;
-    private LocalDateTime occurredAt;
+    private OffsetDateTime occurredAt;
     private boolean overageBilled;
     private String stripeUsageRecordId;
-    private LocalDateTime billingPeriodStart;
-    private LocalDateTime billingPeriodEnd;
+    private OffsetDateTime billingPeriodStart;
+    private OffsetDateTime billingPeriodEnd;
     private String metadata;
 }

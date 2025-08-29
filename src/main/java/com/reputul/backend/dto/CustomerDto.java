@@ -7,7 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @Data
@@ -36,19 +36,19 @@ public class CustomerDto {
     // Feedback tracking
     private Boolean feedbackSubmitted;
     private Integer feedbackCount;
-    private LocalDateTime lastFeedbackDate;
+    private OffsetDateTime lastFeedbackDate;
 
     // SMS compliance fields
     private Boolean smsOptIn;
     private Customer.SmsOptInMethod smsOptInMethod;
-    private LocalDateTime smsOptInTimestamp;
+    private OffsetDateTime smsOptInTimestamp;
     private Boolean smsOptOut;
-    private LocalDateTime smsOptOutTimestamp;
+    private OffsetDateTime smsOptOutTimestamp;
     private Boolean canReceiveSms;
 
     // Timestamps
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private OffsetDateTime createdAt;
+    private OffsetDateTime updatedAt;
 
     // Nested BusinessInfo class
     @Data

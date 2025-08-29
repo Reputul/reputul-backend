@@ -3,7 +3,7 @@ package com.reputul.backend.dto;
 import lombok.Builder;
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 @Builder
@@ -12,5 +12,5 @@ public class WaitlistResponse {
     private String message;
     private boolean duplicate;
     private Integer waitlistCount;
-    private LocalDateTime timestamp;
+    private OffsetDateTime timestamp;
 }

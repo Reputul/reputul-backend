@@ -6,7 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 @Builder
@@ -43,10 +43,10 @@ public class ReviewRequestDto {
 
     // Status and tracking
     private ReviewRequest.RequestStatus status;
-    private LocalDateTime sentAt;
-    private LocalDateTime openedAt;
-    private LocalDateTime clickedAt;
-    private LocalDateTime reviewedAt;
+    private OffsetDateTime sentAt;
+    private OffsetDateTime openedAt;
+    private OffsetDateTime clickedAt;
+    private OffsetDateTime reviewedAt;
 
     // Error handling
     private String errorMessage;
@@ -56,6 +56,6 @@ public class ReviewRequestDto {
     private String smsStatus;
 
     // Timestamps
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private OffsetDateTime createdAt;
+    private OffsetDateTime updatedAt;
 }

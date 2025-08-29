@@ -8,9 +8,12 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -40,7 +43,9 @@ public class Contact {
     @Column(name = "last_job_date")
     private LocalDate lastJobDate;
 
-    @Column(columnDefinition = "JSON")
+    // <-- FIX: map to PostgreSQL JSONB and tell Hibernate it's JSON
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "tags_json", columnDefinition = "jsonb")
     private String tagsJson;
 
     @Column(name = "sms_consent")
@@ -50,10 +55,10 @@ public class Contact {
     private Boolean emailConsent;
 
     @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     // Lazy-loaded business reference
     @ManyToOne(fetch = FetchType.LAZY)
@@ -74,22 +79,22 @@ public class Contact {
         this.email = email;
         this.phone = phone;
         this.lastJobDate = lastJobDate;
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);;
+        this.updatedAt = OffsetDateTime.now(ZoneOffset.UTC);;
     }
 
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+            createdAt = OffsetDateTime.now(ZoneOffset.UTC);
         }
-        updatedAt = LocalDateTime.now();
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
         syncTagsToJson();
     }
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
         syncTagsToJson();
     }
 
@@ -190,8 +195,8 @@ public class Contact {
     public Boolean getEmailConsent() { return emailConsent; }
     public void setEmailConsent(Boolean emailConsent) { this.emailConsent = emailConsent; }
 
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public OffsetDateTime getUpdatedAt() { return updatedAt; }
 
     public Business getBusiness() { return business; }
 

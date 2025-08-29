@@ -18,7 +18,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -423,7 +424,7 @@ public class ContactService {
     }
 
     private void checkImportRateLimit(Long userId) {
-        LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
+        OffsetDateTime oneHourAgo = OffsetDateTime.now(ZoneOffset.UTC).minusHours(1);
         long recentImports = importJobRepository.countByUserIdAndCreatedAtAfter(userId, oneHourAgo);
 
         if (recentImports >= RATE_LIMIT_IMPORTS_PER_HOUR) {

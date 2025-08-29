@@ -6,7 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 // Separate entity for aggregated usage tracking per billing period
 @Entity
@@ -28,10 +29,10 @@ class UsagePeriod {
     private Business business;
 
     @Column(name = "period_start", nullable = false)
-    private LocalDateTime periodStart;
+    private OffsetDateTime periodStart;
 
     @Column(name = "period_end", nullable = false)
-    private LocalDateTime periodEnd;
+    private OffsetDateTime periodEnd;
 
     // Usage counters
     @Builder.Default
@@ -55,23 +56,23 @@ class UsagePeriod {
     private Integer requestsSentToday = 0;
 
     @Column(name = "last_reset_date")
-    private LocalDateTime lastResetDate;
+    private OffsetDateTime lastResetDate;
 
     @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private OffsetDateTime updatedAt;
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
         initializeCounters();
     }
 
     @PreUpdate
     protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     private void initializeCounters() {
@@ -103,6 +104,6 @@ class UsagePeriod {
 
     public void resetDailyCounters() {
         requestsSentToday = 0;
-        lastResetDate = LocalDateTime.now();
+        lastResetDate = OffsetDateTime.now(ZoneOffset.UTC);
     }
 }

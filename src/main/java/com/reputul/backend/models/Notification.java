@@ -3,7 +3,8 @@ package com.reputul.backend.models;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "notifications")
@@ -23,7 +24,7 @@ public class Notification {
 
     private boolean read;
 
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @ManyToOne
     @JoinColumn(name = "user_id")

@@ -5,7 +5,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -48,7 +49,7 @@ public class ImportJob {
     private String errorDetailsJson;
 
     @Column(name = "created_at")
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     // Transient field for error details
     @Transient
@@ -64,13 +65,13 @@ public class ImportJob {
         this.businessId = businessId;
         this.userId = userId;
         this.filename = filename;
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+            createdAt = OffsetDateTime.now(ZoneOffset.UTC);
         }
         syncErrorDetailsToJson();
     }
@@ -146,6 +147,6 @@ public class ImportJob {
     public List<Map<String, Object>> getErrorDetails() { return errorDetails; }
     public void setErrorDetails(List<Map<String, Object>> errorDetails) { this.errorDetails = errorDetails; }
 
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; }
 }

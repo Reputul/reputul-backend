@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -60,8 +60,8 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
      */
     @Query("SELECT COUNT(r) FROM ReviewRequest r WHERE r.business.user.id = :userId AND r.deliveryMethod = 'SMS' AND r.createdAt BETWEEN :startDate AND :endDate")
     Long countSmsRequestsByUserAndDateRange(@Param("userId") Long userId,
-                                            @Param("startDate") LocalDateTime startDate,
-                                            @Param("endDate") LocalDateTime endDate);
+                                            @Param("startDate") OffsetDateTime startDate,
+                                            @Param("endDate") OffsetDateTime endDate);
 
     /**
      * Count delivery method usage by user
@@ -73,13 +73,13 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
      * Find failed SMS requests for retry
      */
     @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'SMS' AND r.status = 'FAILED' AND r.createdAt > :since ORDER BY r.createdAt DESC")
-    List<ReviewRequest> findFailedSmsRequestsSince(@Param("since") LocalDateTime since);
+    List<ReviewRequest> findFailedSmsRequestsSince(@Param("since") OffsetDateTime since);
 
     /**
      * Find pending SMS requests (for cleanup/monitoring)
      */
     @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'SMS' AND r.status = 'PENDING' AND r.createdAt < :olderThan")
-    List<ReviewRequest> findPendingSmsRequestsOlderThan(@Param("olderThan") LocalDateTime olderThan);
+    List<ReviewRequest> findPendingSmsRequestsOlderThan(@Param("olderThan") OffsetDateTime olderThan);
 
     /**
      * Find requests by SMS status (Twilio status)
@@ -106,5 +106,5 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
      * Get recent SMS activity for dashboard
      */
     @Query("SELECT r FROM ReviewRequest r WHERE r.business.user.id = :userId AND r.deliveryMethod = 'SMS' AND r.createdAt > :since ORDER BY r.createdAt DESC")
-    List<ReviewRequest> getRecentSmsActivity(@Param("userId") Long userId, @Param("since") LocalDateTime since);
+    List<ReviewRequest> getRecentSmsActivity(@Param("userId") Long userId, @Param("since") OffsetDateTime since);
 }

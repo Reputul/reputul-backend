@@ -18,7 +18,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @RestController
@@ -68,7 +69,7 @@ public class ReviewController {
             }
 
             review.setBusiness(business);
-            review.setCreatedAt(LocalDateTime.now());
+            review.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
 
             Review savedReview = reviewRepo.save(review);
             reputationService.updateBusinessReputationAndBadge(businessId);
@@ -109,7 +110,7 @@ public class ReviewController {
             }
 
             review.setBusiness(business);
-            review.setCreatedAt(LocalDateTime.now());
+            review.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
             review.setSource("manual"); // Mark as manually added
 
             Review savedReview = reviewRepo.save(review);
@@ -134,7 +135,7 @@ public class ReviewController {
                     }
 
                     review.setBusiness(business);
-                    review.setCreatedAt(LocalDateTime.now());
+                    review.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
                     review.setSource("public"); // Mark as public submission
                     reviewRepo.save(review);
 
