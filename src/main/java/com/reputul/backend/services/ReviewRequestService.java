@@ -10,7 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,7 +77,7 @@ public class ReviewRequestService {
         // Update status based on send result
         if (emailSent) {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
-            reviewRequest.setSentAt(LocalDateTime.now());
+            reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
             log.info("✅ Review request sent successfully to {}", customer.getEmail());
         } else {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
@@ -149,7 +150,7 @@ public class ReviewRequestService {
         // Update status based on SMS send result
         if (smsResult.isSuccess()) {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
-            reviewRequest.setSentAt(LocalDateTime.now());
+            reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
             reviewRequest.setSmsMessageId(smsResult.getMessageSid());
             reviewRequest.setSmsStatus(smsResult.getStatus());
             log.info("✅ Compliance SMS review request sent successfully to {} - SID: {}",
@@ -220,7 +221,7 @@ public class ReviewRequestService {
         // Update status
         if (emailSent) {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
-            reviewRequest.setSentAt(LocalDateTime.now());
+            reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
             log.info("✅ Default template email review request sent successfully to {}", customer.getEmail());
         } else {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
@@ -276,7 +277,7 @@ public class ReviewRequestService {
         // Update status
         if (emailSent) {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
-            reviewRequest.setSentAt(LocalDateTime.now());
+            reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
             log.info("✅ Follow-up email sent successfully to {}", customer.getEmail());
         } else {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
@@ -337,7 +338,7 @@ public class ReviewRequestService {
         // Update status
         if (smsResult.isSuccess()) {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
-            reviewRequest.setSentAt(LocalDateTime.now());
+            reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
             reviewRequest.setSmsMessageId(smsResult.getMessageSid());
             reviewRequest.setSmsStatus(smsResult.getStatus());
             log.info("✅ Follow-up SMS sent successfully to {}", customer.getPhone());
@@ -412,9 +413,9 @@ public class ReviewRequestService {
 
         // Set timestamp based on status
         switch (status) {
-            case OPENED -> request.setOpenedAt(LocalDateTime.now());
-            case CLICKED -> request.setClickedAt(LocalDateTime.now());
-            case COMPLETED -> request.setReviewedAt(LocalDateTime.now());
+            case OPENED -> request.setOpenedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            case CLICKED -> request.setClickedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            case COMPLETED -> request.setReviewedAt(OffsetDateTime.now(ZoneOffset.UTC));
         }
 
         request = reviewRequestRepository.save(request);

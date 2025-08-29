@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @Data
@@ -26,8 +26,8 @@ public class BillingHistoryDto {
         private String invoiceId;
         private double amount;
         private String status;
-        private LocalDateTime createdAt;
-        private LocalDateTime paidAt;
+        private OffsetDateTime createdAt;
+        private OffsetDateTime paidAt;
         private String invoiceUrl;
     }
 
@@ -42,6 +42,6 @@ public class BillingHistoryDto {
         private String oldStatus;
         private String newStatus;
         private String reason;
-        private LocalDateTime changedAt;
+        private OffsetDateTime changedAt;
     }
 }

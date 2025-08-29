@@ -6,8 +6,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -114,10 +115,10 @@ public class SmsRateLimitService {
     /**
      * Calculate next available send time if rate limited
      */
-    public LocalDateTime getNextAvailableSendTime(Business business) {
+    public OffsetDateTime getNextAvailableSendTime(Business business) {
         if (isQuietHours()) {
             // Return next morning at quiet hours end
-            LocalDateTime tomorrow = LocalDateTime.now().plusDays(1);
+            OffsetDateTime tomorrow = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1);
             return tomorrow.with(LocalTime.of(quietHoursEnd, 0));
         }
 
@@ -125,16 +126,16 @@ public class SmsRateLimitService {
 
         if (allowance.dailyRemaining <= 0) {
             // Next day at quiet hours end
-            LocalDateTime tomorrow = LocalDateTime.now().plusDays(1);
+            OffsetDateTime tomorrow = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1);
             return tomorrow.with(LocalTime.of(quietHoursEnd, 0));
         }
 
         if (allowance.hourlyRemaining <= 0) {
             // Next hour
-            return LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0);
+            return OffsetDateTime.now(ZoneOffset.UTC).plusHours(1).withMinute(0).withSecond(0);
         }
 
-        return LocalDateTime.now(); // Can send now
+        return OffsetDateTime.now(ZoneOffset.UTC); // Can send now
     }
 
     /**
@@ -163,11 +164,11 @@ public class SmsRateLimitService {
         AtomicInteger dailyCount = new AtomicInteger(0);
         AtomicInteger hourlyCount = new AtomicInteger(0);
         LocalDate lastResetDate = LocalDate.now();
-        LocalDateTime lastHourlyReset = LocalDateTime.now().withMinute(0).withSecond(0);
+        OffsetDateTime lastHourlyReset = OffsetDateTime.now(ZoneOffset.UTC).withMinute(0).withSecond(0);
 
         void resetIfNeeded() {
             LocalDate today = LocalDate.now();
-            LocalDateTime currentHour = LocalDateTime.now().withMinute(0).withSecond(0);
+            OffsetDateTime currentHour = OffsetDateTime.now(ZoneOffset.UTC).withMinute(0).withSecond(0);
 
             // Reset daily counter
             if (!lastResetDate.equals(today)) {

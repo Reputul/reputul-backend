@@ -15,7 +15,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 
@@ -214,13 +215,13 @@ public class CustomerFeedbackController {
                     .customerEmail(customer.getEmail())
                     .source(request.getType() != null && request.getType().equals("private") ?
                             "private_feedback" : "detailed_feedback") // More specific labeling
-                    .createdAt(LocalDateTime.now())
+                    .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
             Review savedReview = reviewRepository.save(review);
 
             // Update customer record
-            customer.setLastFeedbackDate(LocalDateTime.now());
+            customer.setLastFeedbackDate(OffsetDateTime.now(ZoneOffset.UTC));
             customer.setFeedbackSubmitted(true);
             Integer currentCount = customer.getFeedbackCount();
             customer.setFeedbackCount(currentCount != null ? currentCount + 1 : 1);

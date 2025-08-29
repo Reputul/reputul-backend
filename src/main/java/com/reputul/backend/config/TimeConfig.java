@@ -7,7 +7,7 @@ import java.time.Clock;
 
 /**
  * Provides a single source of truth for time across the app.
- * Always use Clock injection instead of LocalDate.now() / LocalDateTime.now().
+ * Always use Clock injection instead of LocalDate.now() / OffsetDateTime.now(ZoneOffset.UTC).
  */
 @Configuration
 public class TimeConfig {

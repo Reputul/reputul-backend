@@ -9,7 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 
 @Service
@@ -92,8 +93,8 @@ public class UsageService {
         Subscription subscription = subscriptionRepository.findByBusinessId(business.getId())
                 .orElse(null);
 
-        LocalDateTime periodStart = null;
-        LocalDateTime periodEnd = null;
+        OffsetDateTime periodStart = null;
+        OffsetDateTime periodEnd = null;
 
         if (subscription != null && subscription.getCurrentPeriodStart() != null) {
             periodStart = subscription.getCurrentPeriodStart();
@@ -106,7 +107,7 @@ public class UsageService {
                 .requestId(requestId)
                 .billingPeriodStart(periodStart)
                 .billingPeriodEnd(periodEnd)
-                .occurredAt(LocalDateTime.now())
+                .occurredAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .overageBilled(false)
                 .build();
     }
@@ -148,15 +149,15 @@ public class UsageService {
         Subscription subscription = subscriptionRepository.findByBusinessId(business.getId())
                 .orElse(null);
 
-        LocalDateTime periodStart;
-        LocalDateTime periodEnd;
+        OffsetDateTime periodStart; // Changed from OffsetDateTime
+        OffsetDateTime periodEnd;   // Changed from OffsetDateTime
 
         if (subscription != null && subscription.getCurrentPeriodStart() != null) {
             periodStart = subscription.getCurrentPeriodStart();
             periodEnd = subscription.getCurrentPeriodEnd();
         } else {
             // Default to current month if no subscription
-            periodStart = LocalDate.now().atStartOfDay();
+            periodStart = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toOffsetDateTime(); // Changed
             periodEnd = periodStart.plusMonths(1);
         }
 
@@ -177,8 +178,8 @@ public class UsageService {
         );
 
         // Count today's requests for daily limit checking
-        LocalDateTime todayStart = LocalDate.now().atStartOfDay();
-        LocalDateTime todayEnd = todayStart.plusDays(1);
+        OffsetDateTime todayStart = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toOffsetDateTime();
+        OffsetDateTime todayEnd = todayStart.plusDays(1);
 
         int requestsToday = usageEventRepository.countByBusinessAndUsageTypeInAndOccurredAtBetween(
                 business,
@@ -241,8 +242,8 @@ public class UsageService {
 
     // Get historical usage for analytics
     public List<Map<String, Object>> getUsageHistory(Business business, int months) {
-        LocalDateTime endDate = LocalDateTime.now();
-        LocalDateTime startDate = endDate.minusMonths(months);
+        OffsetDateTime endDate = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime startDate = endDate.minusMonths(months);
 
         List<Object[]> monthlyUsage = usageEventRepository.findMonthlyUsageByBusiness(business.getId(), startDate, endDate);
 
@@ -271,8 +272,8 @@ public class UsageService {
     public static class UsageStats {
         private Business business;
         private Subscription subscription;
-        private LocalDateTime periodStart;
-        private LocalDateTime periodEnd;
+        private OffsetDateTime periodStart;
+        private OffsetDateTime periodEnd;
         private int smsSent;
         private int emailSent;
         private int requestsToday;

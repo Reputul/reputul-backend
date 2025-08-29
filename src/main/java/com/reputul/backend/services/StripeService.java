@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.time.Instant;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
 
@@ -232,17 +232,17 @@ public class StripeService {
         subscription.setSmsSubscriptionItemId(smsSubscriptionItemId);
         subscription.setPlan(Subscription.PlanType.valueOf(planName));
         subscription.setStatus(mapStripeStatus(stripeSubscription.getStatus()));
-        subscription.setCurrentPeriodStart(LocalDateTime.ofInstant(
+        subscription.setCurrentPeriodStart(OffsetDateTime.ofInstant(
                 Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodStart()), ZoneOffset.UTC));
-        subscription.setCurrentPeriodEnd(LocalDateTime.ofInstant(
+        subscription.setCurrentPeriodEnd(OffsetDateTime.ofInstant(
                 Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodEnd()), ZoneOffset.UTC));
 
         if (stripeSubscription.getTrialStart() != null) {
-            subscription.setTrialStart(LocalDateTime.ofInstant(
+            subscription.setTrialStart(OffsetDateTime.ofInstant(
                     Instant.ofEpochSecond(stripeSubscription.getTrialStart()), ZoneOffset.UTC));
         }
         if (stripeSubscription.getTrialEnd() != null) {
-            subscription.setTrialEnd(LocalDateTime.ofInstant(
+            subscription.setTrialEnd(OffsetDateTime.ofInstant(
                     Instant.ofEpochSecond(stripeSubscription.getTrialEnd()), ZoneOffset.UTC));
         }
 
@@ -255,14 +255,14 @@ public class StripeService {
             subscription.setPromoCode(promoCode);
             subscription.setPromoKind(Subscription.PromoKind.BETA_3_FREE_THEN_50);
             subscription.setPromoPhase(1); // Starting in free phase
-            subscription.setPromoStartsAt(LocalDateTime.now());
+            subscription.setPromoStartsAt(OffsetDateTime.now(ZoneOffset.UTC));
 
             // Create subscription schedule for multi-phase discount
             String scheduleId = createPromoSubscriptionSchedule(stripeSubscription.getId(), planName);
             subscription.setStripeScheduleId(scheduleId);
 
             // Calculate when phase 1 ends (3 billing cycles)
-            LocalDateTime phaseEndDate = subscription.getCurrentPeriodEnd().plusMonths(2); // 3 cycles total
+            OffsetDateTime phaseEndDate = subscription.getCurrentPeriodEnd().plusMonths(2); // 3 cycles total
             subscription.setPromoEndsAt(phaseEndDate);
 
             log.info("Applied promo code '{}' to subscription {}", promoCode, stripeSubscription.getId());
@@ -320,14 +320,14 @@ public class StripeService {
         }
 
         localSubscription.setStatus(mapStripeStatus(stripeSubscription.getStatus()));
-        localSubscription.setCurrentPeriodStart(LocalDateTime.ofInstant(
+        localSubscription.setCurrentPeriodStart(OffsetDateTime.ofInstant(
                 Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodStart()), ZoneOffset.UTC));
-        localSubscription.setCurrentPeriodEnd(LocalDateTime.ofInstant(
+        localSubscription.setCurrentPeriodEnd(OffsetDateTime.ofInstant(
                 Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodEnd()), ZoneOffset.UTC));
 
         // Check if we moved to phase 2 of promo (50% off phase)
         if (localSubscription.hasPromo() && localSubscription.getPromoPhase() == 1) {
-            LocalDateTime now = LocalDateTime.now();
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
             if (localSubscription.getPromoEndsAt() != null && now.isAfter(localSubscription.getPromoEndsAt())) {
                 localSubscription.setPromoPhase(2); // Now in 50% off phase
                 log.info("Subscription {} moved to promo phase 2 (50% off)", localSubscription.getId());

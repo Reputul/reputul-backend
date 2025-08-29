@@ -9,7 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -56,8 +56,8 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     boolean existsByBusinessAndEmail(Business business, String email);
     boolean existsByBusinessAndPhone(Business business, String phone);
 
-    List<Customer> findByBusinessAndCreatedAtBetween(Business business, LocalDateTime startDate, LocalDateTime endDate);
-    long countByBusinessAndCreatedAtBetween(Business business, LocalDateTime startDate, LocalDateTime endDate);
+    List<Customer> findByBusinessAndCreatedAtBetween(Business business, OffsetDateTime startDate, OffsetDateTime endDate);
+    long countByBusinessAndCreatedAtBetween(Business business, OffsetDateTime startDate, OffsetDateTime endDate);
 
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND LOWER(c.name) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
     List<Customer> findByBusinessAndNameContainingIgnoreCase(@Param("business") Business business, @Param("searchTerm") String searchTerm);
@@ -78,7 +78,7 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     long countByBusinessWithEmail(@Param("business") Business business);
 
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.createdAt >= :sinceDate ORDER BY c.createdAt DESC")
-    List<Customer> findRecentCustomers(@Param("business") Business business, @Param("sinceDate") LocalDateTime sinceDate);
+    List<Customer> findRecentCustomers(@Param("business") Business business, @Param("sinceDate") OffsetDateTime sinceDate);
 
     @Query("SELECT " +
             "COUNT(c) as totalCustomers, " +
@@ -90,7 +90,7 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.phone LIKE CONCAT('%', :phoneDigits, '%')")
     List<Customer> findByBusinessAndPhoneContaining(@Param("business") Business business, @Param("phoneDigits") String phoneDigits);
 
-    void deleteByBusinessAndCreatedAtBefore(Business business, LocalDateTime cutoffDate);
+    void deleteByBusinessAndCreatedAtBefore(Business business, OffsetDateTime cutoffDate);
 
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND NOT EXISTS (SELECT r FROM ReviewRequest r WHERE r.customer = c)")
     List<Customer> findCustomersWithoutReviewRequests(@Param("business") Business business);
@@ -136,7 +136,7 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsLastSentTimestamp >= :since " +
             "ORDER BY c.smsLastSentTimestamp DESC")
-    List<Customer> findWithRecentSms(@Param("user") User user, @Param("since") LocalDateTime since);
+    List<Customer> findWithRecentSms(@Param("user") User user, @Param("since") OffsetDateTime since);
 
     /**
      * Helper method for phone lookup with format variations

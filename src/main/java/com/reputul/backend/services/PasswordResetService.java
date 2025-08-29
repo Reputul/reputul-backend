@@ -10,7 +10,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,7 +47,7 @@ public class PasswordResetService {
 
         // Generate new token
         String token = UUID.randomUUID().toString();
-        LocalDateTime expiresAt = LocalDateTime.now().plusHours(1);
+        OffsetDateTime expiresAt = OffsetDateTime.now(ZoneOffset.UTC).plusHours(1);
 
         PasswordResetToken resetToken = new PasswordResetToken(user, token, expiresAt);
         tokenRepository.save(resetToken);
@@ -76,7 +77,7 @@ public class PasswordResetService {
             throw new IllegalArgumentException("Reset token has already been used");
         }
 
-        if (resetToken.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (resetToken.getExpiresAt().isBefore(OffsetDateTime.now(ZoneOffset.UTC))) {
             throw new IllegalArgumentException("Reset token has expired");
         }
 
@@ -90,7 +91,7 @@ public class PasswordResetService {
         tokenRepository.save(resetToken);
 
         // Clean up expired tokens
-        tokenRepository.deleteExpiredTokens(LocalDateTime.now());
+        tokenRepository.deleteExpiredTokens(OffsetDateTime.now(ZoneOffset.UTC));
 
         log.info("✅ Password successfully reset for user: {}", user.getEmail());
     }

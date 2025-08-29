@@ -14,7 +14,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 @Service
@@ -59,13 +60,13 @@ public class FeedbackGateService {
                 .customerName(customer.getName())
                 .customerEmail(customer.getEmail())
                 .source("internal_feedback_gate") // Mark as internal only
-                .createdAt(LocalDateTime.now())
+                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
 
         reviewRepository.save(gateReview);
 
         // Update customer feedback tracking
-        customer.setLastFeedbackDate(LocalDateTime.now());
+        customer.setLastFeedbackDate(OffsetDateTime.now(ZoneOffset.UTC));
         Integer currentCount = customer.getFeedbackCount();
         customer.setFeedbackCount(currentCount != null ? currentCount + 1 : 1);
         customerRepository.save(customer);

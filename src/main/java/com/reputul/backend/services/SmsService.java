@@ -11,9 +11,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
+
+import java.time.ZoneOffset;
 import java.util.regex.Pattern;
 import java.util.Map;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Service
 @Slf4j
@@ -395,7 +397,7 @@ public class SmsService {
                 fromPhoneNumber,
                 config,
                 quietHours,
-                LocalDateTime.now()
+                OffsetDateTime.now(ZoneOffset.UTC)
         );
     }
 
@@ -453,11 +455,11 @@ public class SmsService {
         private final String fromPhoneNumber;
         private final SmsRateLimitService.SmsRateLimitConfig rateLimitConfig;
         private final boolean currentlyQuietHours;
-        private final LocalDateTime timestamp;
+        private final OffsetDateTime timestamp;
 
         public SmsServiceStatus(boolean twilioConfigured, String fromPhoneNumber,
                                 SmsRateLimitService.SmsRateLimitConfig rateLimitConfig,
-                                boolean currentlyQuietHours, LocalDateTime timestamp) {
+                                boolean currentlyQuietHours, OffsetDateTime timestamp) {
             this.twilioConfigured = twilioConfigured;
             this.fromPhoneNumber = fromPhoneNumber;
             this.rateLimitConfig = rateLimitConfig;
@@ -470,6 +472,6 @@ public class SmsService {
         public String getFromPhoneNumber() { return fromPhoneNumber; }
         public SmsRateLimitService.SmsRateLimitConfig getRateLimitConfig() { return rateLimitConfig; }
         public boolean isCurrentlyQuietHours() { return currentlyQuietHours; }
-        public LocalDateTime getTimestamp() { return timestamp; }
+        public OffsetDateTime getTimestamp() { return timestamp; }
     }
 }

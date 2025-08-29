@@ -15,7 +15,7 @@ public class JacksonConfig {
     public ObjectMapper objectMapper() {
         ObjectMapper mapper = new ObjectMapper();
 
-        // Register Java 8 time module for LocalDateTime support
+        // Register Java 8 time module for OffsetDateTime support
         mapper.registerModule(new JavaTimeModule());
 
         // Don't write dates as timestamps

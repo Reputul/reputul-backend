@@ -3,7 +3,8 @@ package com.reputul.backend.models;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "reviews")
@@ -37,7 +38,7 @@ public class Review {
     @JoinColumn(name = "customer_id")
     private Customer customer;
 
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 
     @ManyToOne
     @JoinColumn(name = "business_id")
@@ -45,7 +46,7 @@ public class Review {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
         if (source == null) {
             source = "manual";
         }

@@ -1,7 +1,8 @@
 package com.reputul.backend.models;
 
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "password_reset_tokens")
@@ -19,23 +20,23 @@ public class PasswordResetToken {
     private String token;
 
     @Column(name = "expires_at", nullable = false)
-    private LocalDateTime expiresAt;
+    private OffsetDateTime expiresAt;
 
     @Column(nullable = false)
     private Boolean used = false;
 
     @Column(name = "created_at")
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private OffsetDateTime createdAt = OffsetDateTime.now(ZoneOffset.UTC);
 
     // Constructors
     public PasswordResetToken() {}
 
-    public PasswordResetToken(User user, String token, LocalDateTime expiresAt) {
+    public PasswordResetToken(User user, String token, OffsetDateTime expiresAt) {
         this.user = user;
         this.token = token;
         this.expiresAt = expiresAt;
         this.used = false;
-        this.createdAt = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     // Getters and Setters
@@ -63,11 +64,11 @@ public class PasswordResetToken {
         this.token = token;
     }
 
-    public LocalDateTime getExpiresAt() {
+    public OffsetDateTime getExpiresAt() {
         return expiresAt;
     }
 
-    public void setExpiresAt(LocalDateTime expiresAt) {
+    public void setExpiresAt(OffsetDateTime expiresAt) {
         this.expiresAt = expiresAt;
     }
 
@@ -79,11 +80,11 @@ public class PasswordResetToken {
         this.used = used;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
+    public void setCreatedAt(OffsetDateTime createdAt) {
         this.createdAt = createdAt;
     }
 }

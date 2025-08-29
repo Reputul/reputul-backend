@@ -17,7 +17,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +52,7 @@ public class BusinessController {
                     .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
 
             business.setUser(owner);
-            business.setCreatedAt(LocalDateTime.now());
+            business.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
             Business savedBusiness = businessRepo.save(business);
 
             return ResponseEntity.ok(savedBusiness);
