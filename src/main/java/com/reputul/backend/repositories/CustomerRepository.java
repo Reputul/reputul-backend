@@ -16,7 +16,7 @@ import java.util.Optional;
 @Repository
 public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
-    // Methods used by CustomerService
+    // ----- User-scoped queries -----
     List<Customer> findByUserOrderByCreatedAtDesc(User user);
     List<Customer> findByUserAndBusinessOrderByCreatedAtDesc(User user, Business business);
     Optional<Customer> findByEmailAndUser(String email, User user);
@@ -38,6 +38,8 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     @Query("SELECT COUNT(c) FROM Customer c JOIN c.tags t WHERE c.user = :user AND t = :tag")
     long countByUserAndTag(@Param("user") User user, @Param("tag") Customer.CustomerTag tag);
 
+    // Note: This uses YEAR/MONTH functions — OK on PostgreSQL via Hibernate,
+    // but if you ever see dialect quirks, prefer a start/end range method.
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND " +
             "YEAR(c.createdAt) = YEAR(CURRENT_DATE) AND " +
             "MONTH(c.createdAt) = MONTH(CURRENT_DATE) " +
@@ -47,7 +49,7 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     List<Customer> findByUserAndServiceDateBetweenOrderByServiceDateDesc(
             User user, LocalDate startDate, LocalDate endDate);
 
-    // Methods used by other services (Business-based queries)
+    // ----- Business-scoped queries -----
     List<Customer> findByBusiness(Business business);
     List<Customer> findByBusinessOrderByCreatedAtDesc(Business business);
     long countByBusiness(Business business);
@@ -65,16 +67,16 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND LOWER(c.email) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
     List<Customer> findByBusinessAndEmailContainingIgnoreCase(@Param("business") Business business, @Param("searchTerm") String searchTerm);
 
-    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.phone IS NOT NULL AND c.phone != ''")
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.phone IS NOT NULL AND c.phone <> ''")
     List<Customer> findByBusinessWithPhone(@Param("business") Business business);
 
-    @Query("SELECT COUNT(c) FROM Customer c WHERE c.business = :business AND c.phone IS NOT NULL AND c.phone != ''")
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.business = :business AND c.phone IS NOT NULL AND c.phone <> ''")
     long countByBusinessWithPhone(@Param("business") Business business);
 
-    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.email IS NOT NULL AND c.email != ''")
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.email IS NOT NULL AND c.email <> ''")
     List<Customer> findByBusinessWithEmail(@Param("business") Business business);
 
-    @Query("SELECT COUNT(c) FROM Customer c WHERE c.business = :business AND c.email IS NOT NULL AND c.email != ''")
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.business = :business AND c.email IS NOT NULL AND c.email <> ''")
     long countByBusinessWithEmail(@Param("business") Business business);
 
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.createdAt >= :sinceDate ORDER BY c.createdAt DESC")
@@ -82,8 +84,8 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
     @Query("SELECT " +
             "COUNT(c) as totalCustomers, " +
-            "SUM(CASE WHEN c.email IS NOT NULL AND c.email != '' THEN 1 ELSE 0 END) as withEmail, " +
-            "SUM(CASE WHEN c.phone IS NOT NULL AND c.phone != '' THEN 1 ELSE 0 END) as withPhone " +
+            "SUM(CASE WHEN c.email IS NOT NULL AND c.email <> '' THEN 1 ELSE 0 END) as withEmail, " +
+            "SUM(CASE WHEN c.phone IS NOT NULL AND c.phone <> '' THEN 1 ELSE 0 END) as withPhone " +
             "FROM Customer c WHERE c.business = :business")
     Object[] getCustomerStatsByBusiness(@Param("business") Business business);
 
@@ -98,34 +100,33 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     @Query("SELECT DISTINCT c FROM Customer c JOIN ReviewRequest r ON r.customer = c WHERE c.business = :business AND r.status = 'SENT'")
     List<Customer> findCustomersWithActiveRequests(@Param("business") Business business);
 
-    // SMS-related methods
+    // ----- SMS-related -----
     Optional<Customer> findByPhone(String phone);
 
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE " +
             "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
-            "AND c.phone != '' ORDER BY c.createdAt DESC")
+            "AND c.phone <> '' ORDER BY c.createdAt DESC")
     List<Customer> findSmsEligibleByUser(@Param("user") User user);
 
     @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.smsOptIn = TRUE " +
             "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
-            "AND c.phone != '' ORDER BY c.createdAt DESC")
+            "AND c.phone <> '' ORDER BY c.createdAt DESC")
     List<Customer> findSmsEligibleByBusiness(@Param("business") Business business);
 
-    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsOptOut = TRUE " +
-            "ORDER BY c.smsOptOutTimestamp DESC")
+    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsOptOut = TRUE ORDER BY c.smsOptOutTimestamp DESC")
     List<Customer> findSmsOptedOutByUser(@Param("user") User user);
 
     @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.phone IS NOT NULL " +
-            "AND c.phone != '' AND (c.smsOptIn IS NULL OR c.smsOptIn = FALSE) " +
+            "AND c.phone <> '' AND (c.smsOptIn IS NULL OR c.smsOptIn = FALSE) " +
             "AND (c.smsOptOut IS NULL OR c.smsOptOut = FALSE) ORDER BY c.createdAt DESC")
     List<Customer> findNeedingSmsConsentByUser(@Param("user") User user);
 
     @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE " +
             "AND (c.smsOptOut = FALSE OR c.smsOptOut IS NULL) AND c.phone IS NOT NULL " +
-            "AND c.phone != ''")
+            "AND c.phone <> ''")
     Long countSmsEligibleByUser(@Param("user") User user);
 
-    @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.phone IS NOT NULL AND c.phone != ''")
+    @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.phone IS NOT NULL AND c.phone <> ''")
     Long countWithPhoneByUser(@Param("user") User user);
 
     @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptIn = TRUE")
@@ -134,37 +135,34 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     @Query("SELECT COUNT(c) FROM Customer c WHERE c.user = :user AND c.smsOptOut = TRUE")
     Long countOptedOutByUser(@Param("user") User user);
 
-    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsLastSentTimestamp >= :since " +
-            "ORDER BY c.smsLastSentTimestamp DESC")
+    @Query("SELECT c FROM Customer c WHERE c.user = :user AND c.smsLastSentTimestamp >= :since ORDER BY c.smsLastSentTimestamp DESC")
     List<Customer> findWithRecentSms(@Param("user") User user, @Param("since") OffsetDateTime since);
 
-    /**
-     * Helper method for phone lookup with format variations
-     */
+    // ---- FIX for the 'In' keyword collision in derived query names ----
+    // Use explicit JPQL so Spring Data doesn't parse 'In' as the 'IN' operator.
+    @Query("SELECT c FROM Customer c WHERE c.business = :business AND c.smsOptIn = :optIn")
+    List<Customer> findByBusinessAndSmsOptIn(@Param("business") Business business, @Param("optIn") boolean optIn);
+
+    // ----- Helper -----
     default Optional<Customer> findByPhoneAnyFormat(String incomingPhone) {
         if (incomingPhone == null || incomingPhone.trim().isEmpty()) {
             return Optional.empty();
         }
-
         String clean = incomingPhone.replaceAll("[^+\\d]", "");
 
-        // Try exact match first
         Optional<Customer> customer = findByPhone(clean);
         if (customer.isPresent()) return customer;
 
-        // Try with + prefix
         if (!clean.startsWith("+")) {
             customer = findByPhone("+" + clean);
             if (customer.isPresent()) return customer;
         }
 
-        // Try without + prefix
         if (clean.startsWith("+")) {
             customer = findByPhone(clean.substring(1));
             if (customer.isPresent()) return customer;
         }
 
-        // Try with US country code for 10-digit numbers
         if (clean.length() == 10 && clean.matches("\\d{10}")) {
             customer = findByPhone("+1" + clean);
             if (customer.isPresent()) return customer;

@@ -13,6 +13,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
 
+/**
+ * Service for tracking and managing usage across the platform
+ * with tight integration to Stripe billing for overage charges
+ */
 @Service
 @Slf4j
 public class UsageService {
@@ -38,6 +42,9 @@ public class UsageService {
         this.stripeService = stripeService;
     }
 
+    /**
+     * Record SMS usage and bill overages to Stripe if necessary
+     */
     @Transactional
     public void recordSmsUsage(Business business, String requestId) {
         try {
@@ -62,229 +69,287 @@ public class UsageService {
 
         } catch (Exception e) {
             log.error("Failed to record SMS usage for business {}: {}", business.getId(), e.getMessage(), e);
+            // Don't throw - usage tracking shouldn't break core functionality
         }
     }
 
+    /**
+     * Record email usage (currently unlimited for all plans)
+     */
     @Transactional
     public void recordEmailUsage(Business business, String requestId) {
         try {
             UsageEvent usageEvent = createUsageEvent(business, UsageEvent.UsageType.EMAIL_REVIEW_REQUEST_SENT, requestId);
-            usageEventRepository.save(usageEvent);
+            usageEvent.setOverageBilled(false); // Emails are unlimited
 
+            usageEventRepository.save(usageEvent);
             log.debug("Recorded email usage for business {}", business.getId());
+
         } catch (Exception e) {
             log.error("Failed to record email usage for business {}: {}", business.getId(), e.getMessage(), e);
         }
     }
 
+    /**
+     * Record review request usage (for rate limiting)
+     */
     @Transactional
-    public void recordCustomerCreation(Business business, String requestId) {
+    public void recordReviewRequestUsage(Business business, String requestId) {
         try {
-            UsageEvent usageEvent = createUsageEvent(business, UsageEvent.UsageType.CUSTOMER_CREATED, requestId);
+            UsageEvent usageEvent = createUsageEvent(business, UsageEvent.UsageType.REVIEW_REQUEST_SENT, requestId);
             usageEventRepository.save(usageEvent);
+            log.debug("Recorded review request usage for business {}", business.getId());
 
+        } catch (Exception e) {
+            log.error("Failed to record review request usage for business {}: {}", business.getId(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Record customer creation usage (for plan limits)
+     */
+    @Transactional
+    public void recordCustomerCreation(Business business, Long customerId) {
+        try {
+            UsageEvent usageEvent = createUsageEvent(business, UsageEvent.UsageType.CUSTOMER_CREATED, customerId.toString());
+            usageEventRepository.save(usageEvent);
             log.debug("Recorded customer creation for business {}", business.getId());
+
         } catch (Exception e) {
             log.error("Failed to record customer creation for business {}: {}", business.getId(), e.getMessage(), e);
         }
     }
 
-    private UsageEvent createUsageEvent(Business business, UsageEvent.UsageType usageType, String requestId) {
-        Subscription subscription = subscriptionRepository.findByBusinessId(business.getId())
-                .orElse(null);
-
-        OffsetDateTime periodStart = null;
-        OffsetDateTime periodEnd = null;
-
-        if (subscription != null && subscription.getCurrentPeriodStart() != null) {
-            periodStart = subscription.getCurrentPeriodStart();
-            periodEnd = subscription.getCurrentPeriodEnd();
-        }
-
-        return UsageEvent.builder()
-                .business(business)
-                .usageType(usageType)
-                .requestId(requestId)
-                .billingPeriodStart(periodStart)
-                .billingPeriodEnd(periodEnd)
-                .occurredAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .overageBilled(false)
-                .build();
-    }
-
-    private void createStripeUsageRecord(Business business, String requestId) {
-        try {
-            Subscription subscription = subscriptionRepository.findByBusinessId(business.getId())
-                    .orElse(null);
-
-            if (subscription == null || subscription.getSmsSubscriptionItemId() == null) {
-                log.warn("Cannot create Stripe usage record: subscription or SMS item missing for business {}", business.getId());
-                return;
-            }
-
-            stripeService.createUsageRecord(
-                    subscription.getSmsSubscriptionItemId(),
-                    1, // quantity
-                    requestId // idempotency key
-            );
-
-        } catch (StripeException e) {
-            log.error("Failed to create Stripe usage record for business {}: {}", business.getId(), e.getMessage(), e);
-        }
-    }
-
-    private boolean determineIfSmsOverage(Business business, int newTotal) {
-        Subscription subscription = subscriptionRepository.findByBusinessId(business.getId())
-                .orElse(null);
-
-        if (subscription == null || !subscription.isActive()) {
-            return false; // No billing if no active subscription
-        }
-
-        PlanPolicy.PlanEntitlement entitlement = planPolicy.getEntitlement(subscription.getPlan());
-        return newTotal > entitlement.getIncludedSmsPerMonth();
-    }
-
+    /**
+     * Get comprehensive usage statistics for a business
+     */
     public UsageStats getCurrentPeriodUsage(Business business) {
-        Subscription subscription = subscriptionRepository.findByBusinessId(business.getId())
-                .orElse(null);
-
-        OffsetDateTime periodStart; // Changed from OffsetDateTime
-        OffsetDateTime periodEnd;   // Changed from OffsetDateTime
-
-        if (subscription != null && subscription.getCurrentPeriodStart() != null) {
-            periodStart = subscription.getCurrentPeriodStart();
-            periodEnd = subscription.getCurrentPeriodEnd();
-        } else {
-            // Default to current month if no subscription
-            periodStart = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toOffsetDateTime(); // Changed
-            periodEnd = periodStart.plusMonths(1);
-        }
-
-        // Count SMS usage in current period
-        int smsSent = usageEventRepository.countByBusinessAndUsageTypeAndOccurredAtBetween(
-                business,
-                UsageEvent.UsageType.SMS_REVIEW_REQUEST_SENT,
-                periodStart,
-                periodEnd
-        );
-
-        // Count email usage in current period
-        int emailSent = usageEventRepository.countByBusinessAndUsageTypeAndOccurredAtBetween(
-                business,
-                UsageEvent.UsageType.EMAIL_REVIEW_REQUEST_SENT,
-                periodStart,
-                periodEnd
-        );
-
-        // Count today's requests for daily limit checking
-        OffsetDateTime todayStart = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toOffsetDateTime();
-        OffsetDateTime todayEnd = todayStart.plusDays(1);
-
-        int requestsToday = usageEventRepository.countByBusinessAndUsageTypeInAndOccurredAtBetween(
-                business,
-                Arrays.asList(UsageEvent.UsageType.SMS_REVIEW_REQUEST_SENT, UsageEvent.UsageType.EMAIL_REVIEW_REQUEST_SENT),
-                todayStart,
-                todayEnd
-        );
-
-        // Count total customers
-        int totalCustomers = (int) customerRepository.countByBusiness(business);
+        OffsetDateTime periodStart = getCurrentPeriodStart(business);
+        OffsetDateTime periodEnd = getCurrentPeriodEnd(business);
 
         return UsageStats.builder()
-                .business(business)
-                .subscription(subscription)
+                .businessId(business.getId())
                 .periodStart(periodStart)
                 .periodEnd(periodEnd)
-                .smsSent(smsSent)
-                .emailSent(emailSent)
-                .requestsToday(requestsToday)
-                .totalCustomers(totalCustomers)
+                .smsSent(usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                        business, UsageEvent.UsageType.SMS_REVIEW_REQUEST_SENT, periodStart, periodEnd))
+                .emailSent(usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                        business, UsageEvent.UsageType.EMAIL_REVIEW_REQUEST_SENT, periodStart, periodEnd))
+                .reviewRequestsSent(usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                        business, UsageEvent.UsageType.REVIEW_REQUEST_SENT, periodStart, periodEnd))
+                .customersCreated(usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                        business, UsageEvent.UsageType.CUSTOMER_CREATED, periodStart, periodEnd))
+                .totalCustomers(customerRepository.countByBusiness(business))
                 .build();
     }
 
+    /**
+     * Get usage summary formatted for API responses
+     */
     public Map<String, Object> getUsageSummaryForApi(Business business) {
-        UsageStats stats = getCurrentPeriodUsage(business);
-        PlanPolicy.PlanEntitlement entitlement = null;
+        UsageStats usage = getCurrentPeriodUsage(business);
+        PlanPolicy.PlanEntitlement entitlement = getBusinessEntitlement(business);
 
-        if (stats.getSubscription() != null) {
-            entitlement = planPolicy.getEntitlement(stats.getSubscription().getPlan());
-        }
+        // Get today's usage for rate limiting
+        OffsetDateTime todayStart = OffsetDateTime.now().withHour(0).withMinute(0).withSecond(0);
+        OffsetDateTime todayEnd = todayStart.plusDays(1);
+
+        int requestsToday = usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                business, UsageEvent.UsageType.REVIEW_REQUEST_SENT, todayStart, todayEnd);
 
         Map<String, Object> summary = new HashMap<>();
 
-        // Usage data
-        summary.put("smsSent", stats.getSmsSent());
-        summary.put("emailSent", stats.getEmailSent());
-        summary.put("requestsToday", stats.getRequestsToday());
-        summary.put("totalCustomers", stats.getTotalCustomers());
-        summary.put("periodStart", stats.getPeriodStart());
-        summary.put("periodEnd", stats.getPeriodEnd());
+        // Current period usage
+        summary.put("smsSent", usage.smsSent);
+        summary.put("smsIncluded", entitlement.getIncludedSmsPerMonth());
+        summary.put("smsOverage", Math.max(0, usage.smsSent - entitlement.getIncludedSmsPerMonth()));
 
-        // Plan limits and overages
-        if (entitlement != null) {
-            summary.put("smsIncluded", entitlement.getIncludedSmsPerMonth());
-            summary.put("emailIncluded", entitlement.hasUnlimitedEmail() ? -1 : entitlement.getIncludedEmailPerMonth());
-            summary.put("maxRequestsPerDay", entitlement.getMaxRequestsPerDay());
-            summary.put("maxCustomers", entitlement.getMaxCustomers());
+        summary.put("emailSent", usage.emailSent);
+        summary.put("emailIncluded", entitlement.getIncludedEmailPerMonth()); // -1 = unlimited
 
-            summary.put("smsOverage", entitlement.getSmsOverage(stats.getSmsSent()));
-            summary.put("emailOverage", entitlement.getEmailOverage(stats.getEmailSent()));
+        summary.put("requestsToday", requestsToday);
+        summary.put("maxRequestsPerDay", entitlement.getMaxRequestsPerDay());
 
-            // Usage percentages
-            summary.put("smsUsagePercent", Math.min(100, (stats.getSmsSent() * 100) / entitlement.getIncludedSmsPerMonth()));
-            summary.put("dailyRequestsPercent", Math.min(100, (stats.getRequestsToday() * 100) / entitlement.getMaxRequestsPerDay()));
-            summary.put("customersPercent", Math.min(100, (stats.getTotalCustomers() * 100) / entitlement.getMaxCustomers()));
-        }
+        summary.put("totalCustomers", usage.totalCustomers);
+        summary.put("maxCustomers", entitlement.getMaxCustomers());
+
+        // Calculate usage percentages
+        summary.put("smsUsagePercent", calculateUsagePercent(usage.smsSent, entitlement.getIncludedSmsPerMonth()));
+        summary.put("dailyRequestsPercent", calculateUsagePercent(requestsToday, entitlement.getMaxRequestsPerDay()));
+        summary.put("customersPercent", calculateUsagePercent(usage.totalCustomers, entitlement.getMaxCustomers()));
+
+        // Period info
+        summary.put("periodStart", usage.periodStart);
+        summary.put("periodEnd", usage.periodEnd);
 
         return summary;
     }
 
-    // Get historical usage for analytics
+    /**
+     * Get usage history for analytics (last N months)
+     */
     public List<Map<String, Object>> getUsageHistory(Business business, int months) {
-        OffsetDateTime endDate = OffsetDateTime.now(ZoneOffset.UTC);
-        OffsetDateTime startDate = endDate.minusMonths(months);
-
-        List<Object[]> monthlyUsage = usageEventRepository.findMonthlyUsageByBusiness(business.getId(), startDate, endDate);
-
         List<Map<String, Object>> history = new ArrayList<>();
-        for (Object[] row : monthlyUsage) {
-            Map<String, Object> monthData = new HashMap<>();
-            monthData.put("month", row[0]); // YYYY-MM format
-            monthData.put("smsSent", row[1]);
-            monthData.put("emailSent", row[2]);
-            monthData.put("totalRequests", ((Number) row[1]).intValue() + ((Number) row[2]).intValue());
+
+        for (int i = months - 1; i >= 0; i--) {
+            OffsetDateTime monthStart = OffsetDateTime.now().minusMonths(i).withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
+            OffsetDateTime monthEnd = monthStart.plusMonths(1);
+
+            int smsCount = usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                    business, UsageEvent.UsageType.SMS_REVIEW_REQUEST_SENT, monthStart, monthEnd);
+            int emailCount = usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                    business, UsageEvent.UsageType.EMAIL_REVIEW_REQUEST_SENT, monthStart, monthEnd);
+            int requestCount = usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                    business, UsageEvent.UsageType.REVIEW_REQUEST_SENT, monthStart, monthEnd);
+
+            Map<String, Object> monthData = Map.of(
+                    "month", monthStart.getMonth().toString(),
+                    "year", monthStart.getYear(),
+                    "sms", smsCount,
+                    "email", emailCount,
+                    "requests", requestCount,
+                    "periodStart", monthStart,
+                    "periodEnd", monthEnd
+            );
+
             history.add(monthData);
         }
 
         return history;
     }
 
-    // Reset daily counters (could be called by a scheduled job)
-    public void resetDailyCounters() {
-        log.info("Resetting daily usage counters");
-        // Implementation would reset daily counters in a usage_periods table if we had one
+    /**
+     * Check if business is over SMS limit
+     */
+    public boolean isOverSmsLimit(Business business) {
+        UsageStats usage = getCurrentPeriodUsage(business);
+        PlanPolicy.PlanEntitlement entitlement = getBusinessEntitlement(business);
+        return usage.smsSent >= entitlement.getIncludedSmsPerMonth();
     }
 
-    // Usage stats data class
+    /**
+     * Check if business is over daily request limit
+     */
+    public boolean isOverDailyRequestLimit(Business business) {
+        OffsetDateTime todayStart = OffsetDateTime.now().withHour(0).withMinute(0).withSecond(0);
+        OffsetDateTime todayEnd = todayStart.plusDays(1);
+
+        int requestsToday = usageEventRepository.countByBusinessAndTypeAndCreatedAtBetween(
+                business, UsageEvent.UsageType.REVIEW_REQUEST_SENT, todayStart, todayEnd);
+
+        PlanPolicy.PlanEntitlement entitlement = getBusinessEntitlement(business);
+        return requestsToday >= entitlement.getMaxRequestsPerDay();
+    }
+
+    /**
+     * Check if business is over customer limit
+     */
+    public boolean isOverCustomerLimit(Business business) {
+        long totalCustomers = customerRepository.countByBusiness(business);
+        PlanPolicy.PlanEntitlement entitlement = getBusinessEntitlement(business);
+        return totalCustomers >= entitlement.getMaxCustomers();
+    }
+
+    // Private helper methods
+
+    private UsageEvent createUsageEvent(Business business, UsageEvent.UsageType type, String referenceId) {
+        return UsageEvent.builder()
+                .business(business)
+                .type(type)
+                .referenceId(referenceId)
+                .createdAt(OffsetDateTime.now())
+                .overageBilled(false)
+                .build();
+    }
+
+    private boolean determineIfSmsOverage(Business business, int totalSmsCount) {
+        PlanPolicy.PlanEntitlement entitlement = getBusinessEntitlement(business);
+        return totalSmsCount > entitlement.getIncludedSmsPerMonth();
+    }
+
+    private void createStripeUsageRecord(Business business, String requestId) {
+        try {
+            Optional<Subscription> subscriptionOpt = subscriptionRepository.findActiveByBusinessId(business.getId());
+            if (subscriptionOpt.isEmpty()) {
+                log.warn("No active subscription found for business {} - cannot bill SMS overage", business.getId());
+                return;
+            }
+
+            Subscription subscription = subscriptionOpt.get();
+            if (subscription.getSmsSubscriptionItemId() == null) {
+                log.warn("No SMS subscription item ID found for business {} - cannot bill SMS overage", business.getId());
+                return;
+            }
+
+            // Create usage record in Stripe for 1 SMS
+            String idempotencyKey = "sms_" + business.getId() + "_" + requestId + "_" + System.currentTimeMillis();
+            stripeService.createUsageRecord(subscription.getSmsSubscriptionItemId(), 1, idempotencyKey);
+
+        } catch (StripeException e) {
+            log.error("Failed to create Stripe usage record for business {}: {}", business.getId(), e.getMessage(), e);
+            throw new RuntimeException("Failed to bill SMS overage", e);
+        }
+    }
+
+    private PlanPolicy.PlanEntitlement getBusinessEntitlement(Business business) {
+        Optional<Subscription> subscriptionOpt = subscriptionRepository.findActiveByBusinessId(business.getId());
+
+        if (subscriptionOpt.isEmpty()) {
+            // No subscription = free tier with minimal limits
+            return PlanPolicy.PlanEntitlement.builder()
+                    .maxCustomers(10)
+                    .maxRequestsPerDay(5)
+                    .includedSmsPerMonth(0)
+                    .includedEmailPerMonth(50)
+                    .build();
+        }
+
+        Subscription subscription = subscriptionOpt.get();
+        return planPolicy.getEntitlement(subscription.getPlan());
+    }
+
+    private OffsetDateTime getCurrentPeriodStart(Business business) {
+        Optional<Subscription> subscriptionOpt = subscriptionRepository.findActiveByBusinessId(business.getId());
+
+        if (subscriptionOpt.isPresent() && subscriptionOpt.get().getCurrentPeriodStart() != null) {
+            return subscriptionOpt.get().getCurrentPeriodStart();
+        }
+
+        // Default to start of current month
+        return OffsetDateTime.now().withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
+    }
+
+    private OffsetDateTime getCurrentPeriodEnd(Business business) {
+        Optional<Subscription> subscriptionOpt = subscriptionRepository.findActiveByBusinessId(business.getId());
+
+        if (subscriptionOpt.isPresent() && subscriptionOpt.get().getCurrentPeriodEnd() != null) {
+            return subscriptionOpt.get().getCurrentPeriodEnd();
+        }
+
+        // Default to end of current month
+        return OffsetDateTime.now().withDayOfMonth(1).plusMonths(1).minusSeconds(1);
+    }
+
+    private int calculateUsagePercent(long used, int limit) {
+        if (limit <= 0) return 0; // Unlimited
+        if (limit == -1) return 0; // Unlimited indicator
+        return (int) Math.min(100, (used * 100) / limit);
+    }
+
+    // Inner classes for data transfer
+
     @lombok.Data
     @lombok.Builder
+    @lombok.NoArgsConstructor
+    @lombok.AllArgsConstructor
     public static class UsageStats {
-        private Business business;
-        private Subscription subscription;
-        private OffsetDateTime periodStart;
-        private OffsetDateTime periodEnd;
-        private int smsSent;
-        private int emailSent;
-        private int requestsToday;
-        private int totalCustomers;
-
-        public boolean hasSubscription() {
-            return subscription != null;
-        }
-
-        public boolean isActiveSubscription() {
-            return hasSubscription() && subscription.isActive();
-        }
+        public Long businessId;
+        public OffsetDateTime periodStart;
+        public OffsetDateTime periodEnd;
+        public int smsSent;
+        public int emailSent;
+        public int reviewRequestsSent;
+        public int customersCreated;
+        public long totalCustomers;
     }
 }
