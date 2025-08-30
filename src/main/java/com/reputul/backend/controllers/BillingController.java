@@ -9,6 +9,9 @@ import com.reputul.backend.services.PlanEnforcer;
 import com.reputul.backend.services.StripeService;
 import com.reputul.backend.services.UsageService;
 import com.stripe.exception.StripeException;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -17,6 +20,13 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Controller for all billing-related operations including:
+ * - Checkout session creation
+ * - Billing portal access
+ * - Subscription information retrieval
+ * - Plan entitlement checking
+ */
 @RestController
 @RequestMapping("/api/billing")
 @Slf4j
@@ -45,7 +55,7 @@ public class BillingController {
      */
     @PostMapping("/checkout-session")
     public ResponseEntity<Map<String, Object>> createCheckoutSession(
-            @RequestBody CheckoutRequest request,
+            @Valid @RequestBody CheckoutRequest request,
             Authentication authentication) {
         try {
             User user = getCurrentUser(authentication);
@@ -64,6 +74,25 @@ public class BillingController {
                 ));
             }
 
+            // Check if user already has an active subscription
+            try {
+                Map<String, Object> existingSubscription = stripeService.getSubscriptionSummary(user);
+                if (Boolean.TRUE.equals(existingSubscription.get("hasSubscription"))) {
+                    String currentStatus = (String) existingSubscription.get("status");
+                    if ("ACTIVE".equals(currentStatus) || "TRIALING".equals(currentStatus)) {
+                        return ResponseEntity.badRequest().body(Map.of(
+                                "error", "User already has an active subscription",
+                                "currentPlan", existingSubscription.get("plan"),
+                                "currentStatus", currentStatus,
+                                "suggestion", "Use billing portal to manage existing subscription"
+                        ));
+                    }
+                }
+            } catch (Exception e) {
+                // Log but don't block checkout if subscription check fails
+                log.warn("Failed to check existing subscription for user {}: {}", user.getId(), e.getMessage());
+            }
+
             // Validate promo code if provided
             if (request.getPromoCode() != null && !request.getPromoCode().trim().isEmpty()) {
                 if (!stripeService.isValidPromoCode(request.getPromoCode())) {
@@ -73,23 +102,34 @@ public class BillingController {
                 }
             }
 
-            String checkoutUrl = stripeService.createCheckoutSession(user, planType, request.getPromoCode());
+            String checkoutUrl = stripeService.createCheckoutSession(user, planType,
+                    request.getPromoCode() != null ? request.getPromoCode().trim() : null);
 
             return ResponseEntity.ok(Map.of(
                     "url", checkoutUrl,
                     "plan", planType.name(),
-                    "promoCode", request.getPromoCode() != null ? request.getPromoCode() : ""
+                    "promoCode", request.getPromoCode() != null ? request.getPromoCode() : "",
+                    "message", "Checkout session created successfully"
             ));
 
         } catch (StripeException e) {
             log.error("Stripe error creating checkout session: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Failed to create checkout session: " + e.getMessage()
+                    "error", "Failed to create checkout session: " + e.getCode(),
+                    "message", e.getMessage(),
+                    "type", "stripe_error"
+            ));
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid argument for checkout session: {}", e.getMessage(), e);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", e.getMessage(),
+                    "type", "validation_error"
             ));
         } catch (Exception e) {
             log.error("Error creating checkout session: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Internal server error"
+                    "error", "Internal server error",
+                    "type", "server_error"
             ));
         }
     }
@@ -104,25 +144,41 @@ public class BillingController {
 
             log.info("Creating billing portal session for user {}", user.getId());
 
+            // Check if user has a subscription
+            Map<String, Object> subscriptionSummary = stripeService.getSubscriptionSummary(user);
+            if (!Boolean.TRUE.equals(subscriptionSummary.get("hasSubscription"))) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "No subscription found",
+                        "message", "User must have a subscription to access billing portal",
+                        "suggestion", "Create a subscription first"
+                ));
+            }
+
             String portalUrl = stripeService.createBillingPortalSession(user);
 
-            return ResponseEntity.ok(Map.of("url", portalUrl));
+            return ResponseEntity.ok(Map.of(
+                    "url", portalUrl,
+                    "message", "Billing portal session created successfully"
+            ));
 
         } catch (StripeException e) {
             log.error("Stripe error creating portal session: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Failed to create portal session: " + e.getMessage()
+                    "error", "Failed to create portal session: " + e.getCode(),
+                    "message", e.getMessage(),
+                    "type", "stripe_error"
             ));
         } catch (Exception e) {
             log.error("Error creating portal session: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Internal server error"
+                    "error", "Internal server error",
+                    "type", "server_error"
             ));
         }
     }
 
     /**
-     * Get subscription and usage information
+     * Get comprehensive subscription and usage information
      */
     @GetMapping("/subscription")
     public ResponseEntity<Map<String, Object>> getSubscriptionInfo(Authentication authentication) {
@@ -148,14 +204,25 @@ public class BillingController {
 
                 // Get usage history (last 6 months)
                 response.put("usageHistory", usageService.getUsageHistory(primaryBusiness, 6));
+            } else {
+                // User has no business yet
+                response.put("usage", Map.of(
+                        "hasBusiness", false,
+                        "message", "No business found - create a business to view usage"
+                ));
             }
+
+            // Add helpful metadata
+            response.put("timestamp", System.currentTimeMillis());
+            response.put("userId", user.getId());
 
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
             log.error("Error getting subscription info for user: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Failed to load subscription information"
+                    "error", "Failed to load subscription information",
+                    "type", "server_error"
             ));
         }
     }
@@ -167,6 +234,7 @@ public class BillingController {
     public ResponseEntity<Map<String, Object>> getBusinessBillingStatus(
             @PathVariable Long businessId,
             Authentication authentication) {
+
         try {
             User user = getCurrentUser(authentication);
 
@@ -177,74 +245,42 @@ public class BillingController {
                 return ResponseEntity.notFound().build();
             }
 
-            Map<String, Object> status = planEnforcer.getPlanStatus(business);
-            Map<String, Object> usage = usageService.getUsageSummaryForApi(business);
+            Map<String, Object> response = new HashMap<>();
 
-            return ResponseEntity.ok(Map.of(
-                    "planStatus", status,
-                    "usage", usage,
-                    "businessId", businessId,
-                    "businessName", business.getName()
+            // Get plan status
+            Map<String, Object> planStatus = planEnforcer.getPlanStatus(business);
+            response.put("planStatus", planStatus);
+
+            // Get usage summary
+            Map<String, Object> usageSummary = usageService.getUsageSummaryForApi(business);
+            response.put("usage", usageSummary);
+
+            // Add business info
+            response.put("business", Map.of(
+                    "id", business.getId(),
+                    "name", business.getName(),
+                    "industry", business.getIndustry()
             ));
+
+            return ResponseEntity.ok(response);
 
         } catch (Exception e) {
             log.error("Error getting business billing status: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Failed to load billing status"
+                    "error", "Failed to load business billing status",
+                    "type", "server_error"
             ));
         }
     }
 
     /**
-     * Validate a promo code
-     */
-    @PostMapping("/validate-promo")
-    public ResponseEntity<Map<String, Object>> validatePromoCode(@RequestBody Map<String, String> request) {
-        try {
-            String promoCode = request.get("promoCode");
-
-            if (promoCode == null || promoCode.trim().isEmpty()) {
-                return ResponseEntity.ok(Map.of(
-                        "valid", false,
-                        "message", "Promo code is required"
-                ));
-            }
-
-            boolean isValid = stripeService.isValidPromoCode(promoCode);
-
-            if (isValid) {
-                return ResponseEntity.ok(Map.of(
-                        "valid", true,
-                        "message", "Valid promo code! You'll get 3 months free, then 50% off forever.",
-                        "discount", Map.of(
-                                "phase1", "100% off for 3 months",
-                                "phase2", "50% off thereafter",
-                                "description", "3 months free, then 50% off forever"
-                        )
-                ));
-            } else {
-                return ResponseEntity.ok(Map.of(
-                        "valid", false,
-                        "message", "Invalid promo code"
-                ));
-            }
-
-        } catch (Exception e) {
-            log.error("Error validating promo code: {}", e.getMessage(), e);
-            return ResponseEntity.ok(Map.of(
-                    "valid", false,
-                    "message", "Error validating promo code"
-            ));
-        }
-    }
-
-    /**
-     * Check entitlements before performing an action
+     * Check if user can perform a specific action (plan enforcement)
      */
     @PostMapping("/check-entitlement")
     public ResponseEntity<Map<String, Object>> checkEntitlement(
-            @RequestBody EntitlementCheckRequest request,
+            @Valid @RequestBody EntitlementCheckRequest request,
             Authentication authentication) {
+
         try {
             User user = getCurrentUser(authentication);
 
@@ -270,20 +306,69 @@ public class BillingController {
             log.error("Error checking entitlement: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(Map.of(
                     "allowed", false,
-                    "message", "Error checking plan limits"
+                    "message", "Error checking plan limits",
+                    "type", "server_error"
             ));
         }
     }
 
+    /**
+     * Get available plans with pricing information
+     */
+    @GetMapping("/plans")
+    public ResponseEntity<Map<String, Object>> getPlans() {
+        try {
+            Map<String, Object> plans = new HashMap<>();
+
+            for (Subscription.PlanType plan : Subscription.PlanType.values()) {
+                plans.put(plan.name(), Map.of(
+                        "name", plan.getDisplayName(),
+                        "price", plan.getPriceDisplay(),
+                        "maxCustomers", plan.getMaxCustomers(),
+                        "includedSms", plan.getIncludedSmsPerMonth()
+                ));
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "plans", plans,
+                    "currency", "USD",
+                    "billing", "monthly",
+                    "smsOveragePrice", "$0.05 per message"
+            ));
+
+        } catch (Exception e) {
+            log.error("Error getting plans: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error", "Failed to load plans",
+                    "type", "server_error"
+            ));
+        }
+    }
+
+    /**
+     * Health check for billing service
+     */
+    @GetMapping("/health")
+    public ResponseEntity<Map<String, Object>> health() {
+        return ResponseEntity.ok(Map.of(
+                "status", "ok",
+                "service", "billing",
+                "timestamp", System.currentTimeMillis()
+        ));
+    }
+
+    // Helper method to get current user
     private User getCurrentUser(Authentication authentication) {
         String email = authentication.getName();
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new RuntimeException("User not found: " + email));
     }
 
-    // Request DTOs
+    // Request DTOs with validation
     public static class CheckoutRequest {
+        @NotBlank(message = "Plan is required")
         private String plan;
+
         private String promoCode;
 
         public String getPlan() { return plan; }
@@ -293,7 +378,10 @@ public class BillingController {
     }
 
     public static class EntitlementCheckRequest {
+        @NotNull(message = "Business ID is required")
         private Long businessId;
+
+        @NotBlank(message = "Action is required")
         private String action;
 
         public Long getBusinessId() { return businessId; }

@@ -10,6 +10,10 @@ import org.springframework.web.bind.annotation.*;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
+/**
+ * Legacy subscription controller - UPDATED for backward compatibility
+ * Use BillingController for new Stripe integration
+ */
 @RestController
 @RequestMapping("/api/subscriptions")
 public class SubscriptionController {
@@ -26,14 +30,31 @@ public class SubscriptionController {
     public Subscription createOrUpdate(@PathVariable Long businessId, @RequestBody Subscription subscription) {
         Business business = businessRepo.findById(businessId).orElseThrow();
         subscription.setBusiness(business);
-        subscription.setStartDate(OffsetDateTime.now(ZoneOffset.UTC));
+
+        // Use new field but also set legacy field for compatibility
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        subscription.setStartDate(now);
+        subscription.setCurrentPeriodStart(now);
+
         if (subscription.isTrial()) {
             subscription.setStatus(Subscription.SubscriptionStatus.TRIALING);
-            subscription.setEndDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(14));
+            subscription.setTrial(true); // Legacy field
+
+            OffsetDateTime trialEnd = now.plusDays(14);
+            subscription.setEndDate(trialEnd);
+            subscription.setTrialEnd(trialEnd);
         } else {
             subscription.setStatus(Subscription.SubscriptionStatus.ACTIVE);
-            subscription.setRenewalDate(OffsetDateTime.now(ZoneOffset.UTC).plusMonths(1));
+            subscription.setTrial(false);
+
+            OffsetDateTime renewalDate = now.plusMonths(1);
+            subscription.setRenewalDate(renewalDate);
+            subscription.setCurrentPeriodEnd(renewalDate);
         }
+
+        // Ensure legacy fields are synced
+        subscription.syncLegacyFields();
+
         return subscriptionRepo.save(subscription);
     }
 
