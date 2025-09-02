@@ -1,134 +1,57 @@
 package com.reputul.backend.controllers;
 
-import com.reputul.backend.dto.BusinessResponseDto;
-import com.reputul.backend.dto.ReviewSummaryDto;
 import com.reputul.backend.models.Business;
-import com.reputul.backend.models.Review;
 import com.reputul.backend.repositories.BusinessRepository;
-import com.reputul.backend.repositories.ReviewRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+/**
+ * PUBLIC endpoint for business information
+ * Used by SMS signup page and other public-facing features
+ */
 @RestController
 @RequestMapping("/api/public/businesses")
+@RequiredArgsConstructor
+@Slf4j
+@CrossOrigin(origins = {"https://reputul.com", "https://www.reputul.com", "http://localhost:3000"})
 public class PublicBusinessController {
 
-    private final BusinessRepository businessRepo;
-    private final ReviewRepository reviewRepo;
-
-    public PublicBusinessController(BusinessRepository businessRepo, ReviewRepository reviewRepo) {
-        this.businessRepo = businessRepo;
-        this.reviewRepo = reviewRepo;
-    }
+    private final BusinessRepository businessRepository;
 
     /**
-     * Get public business information by ID
-     * This endpoint is accessible without authentication
+     * PUBLIC: Get business info for SMS signup form
+     * Allows the signup form to display business details without authentication
      */
-    @GetMapping("/{id}")
-    public ResponseEntity<?> getPublicBusinessById(@PathVariable Long id) {
-        System.out.println("=== PUBLIC ENDPOINT HIT - Business ID: " + id + " ===");
-
+    @GetMapping("/{businessId}")
+    public ResponseEntity<?> getBusinessInfo(@PathVariable Long businessId) {
         try {
-            Business business = businessRepo.findById(id).orElse(null);
+            Optional<Business> businessOpt = businessRepository.findById(businessId);
 
-            if (business == null) {
-                System.out.println("❌ Business not found with ID: " + id);
+            if (businessOpt.isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
 
-            System.out.println("✅ Found business: " + business.getName());
+            Business business = businessOpt.get();
 
-            // Create simple response without DTO builder for now
-            Map<String, Object> response = new HashMap<>();
-            response.put("id", business.getId());
-            response.put("name", business.getName());
-            response.put("industry", business.getIndustry());
-            response.put("phone", business.getPhone());
-            response.put("website", business.getWebsite());
-            response.put("address", business.getAddress());
-            response.put("reputationScore", business.getReputationScore());
-            response.put("badge", business.getBadge());
-            response.put("reviewPlatformsConfigured", business.getReviewPlatformsConfigured());
-
-            // Handle reviews safely
-            try {
-                int reviewCount = business.getReviews() != null ? business.getReviews().size() : 0;
-                response.put("reviewCount", reviewCount);
-                System.out.println("✅ Review count: " + reviewCount);
-            } catch (Exception e) {
-                System.out.println("⚠️ Could not load reviews: " + e.getMessage());
-                response.put("reviewCount", 0);
-            }
-
-            System.out.println("✅ Returning response for business: " + business.getName());
-            return ResponseEntity.ok(response);
+            // Return only public-safe business information
+            return ResponseEntity.ok(Map.of(
+                    "id", business.getId(),
+                    "name", business.getName(),
+                    "industry", business.getIndustry(),
+                    "phone", business.getPhone() != null ? business.getPhone() : "",
+                    "website", business.getWebsite() != null ? business.getWebsite() : "",
+                    "address", business.getAddress() != null ? business.getAddress() : ""
+            ));
 
         } catch (Exception e) {
-            System.out.println("❌ Error in getPublicBusinessById: " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.status(500).body("Error: " + e.getMessage());
+            log.error("Error fetching public business info: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Unable to fetch business information"));
         }
-    }
-
-    /**
-     * Get public review summary for a business
-     * This endpoint is accessible without authentication
-     */
-    @GetMapping("/{id}/review-summary")
-    public ResponseEntity<?> getPublicReviewSummary(@PathVariable Long id) {
-        try {
-            Business business = businessRepo.findById(id).orElse(null);
-
-            if (business == null) {
-                return ResponseEntity.notFound().build();
-            }
-
-            double avgRating = reviewRepo.findAverageRatingByBusinessId(id) != null
-                    ? reviewRepo.findAverageRatingByBusinessId(id) : 0.0;
-            long total = reviewRepo.countByBusinessId(id);
-            List<Review> recent = reviewRepo.findTop1ByBusinessIdOrderByCreatedAtDesc(id);
-            String comment = recent.isEmpty() ? "No reviews yet." : recent.get(0).getComment();
-
-            String badge = business.getBadge() != null ? business.getBadge() : "Unranked";
-
-            ReviewSummaryDto summary = new ReviewSummaryDto(avgRating, (int) total, comment, badge);
-            return ResponseEntity.ok(summary);
-        } catch (Exception e) {
-            System.out.println("❌ Error in getPublicReviewSummary: " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.status(500).body("Error: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Get all public businesses (optional - for listing pages)
-     * This endpoint is accessible without authentication
-     */
-    @GetMapping
-    public List<Business> getAllPublicBusinesses() {
-        return businessRepo.findAll();
-    }
-
-    /**
-     * Get public businesses by industry (optional - for filtering)
-     * This endpoint is accessible without authentication
-     */
-    @GetMapping("/industry/{industry}")
-    public List<Business> getPublicBusinessesByIndustry(@PathVariable String industry) {
-        return businessRepo.findByIndustryIgnoreCase(industry);
-    }
-
-    /**
-     * Search public businesses by name (optional - for search functionality)
-     * This endpoint is accessible without authentication
-     */
-    @GetMapping("/search")
-    public List<Business> searchPublicBusinesses(@RequestParam String name) {
-        return businessRepo.findByNameContainingIgnoreCase(name);
     }
 }

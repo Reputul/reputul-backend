@@ -115,6 +115,7 @@ public class Customer {
     @PrePersist
     protected void onCreate() {
         createdAt = OffsetDateTime.now();
+        updatedAt = OffsetDateTime.now();
         if (feedbackCount == null) {
             feedbackCount = 0;
         }

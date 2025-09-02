@@ -39,10 +39,16 @@ public class SmsInboundWebhookController {
     @Value("${app.support.phone:1-800-REPUTUL}")
     private String supportPhone;
 
-    // Keywords patterns (case-insensitive)
-    private static final Pattern STOP_PATTERN = Pattern.compile("\\b(STOP|CANCEL|END|QUIT|UNSUBSCRIBE|REMOVE)\\b", Pattern.CASE_INSENSITIVE);
+    @Value("${app.support.email:support@reputul.com}")
+    private String supportEmail;
+
+    // UPDATED: Expanded keywords patterns (case-insensitive) per Twilio compliance
+    private static final Pattern STOP_PATTERN = Pattern.compile("\\b(STOP|STOPALL|CANCEL|END|QUIT|UNSUBSCRIBE|REMOVE|REVOKE|OPTOUT)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern START_PATTERN = Pattern.compile("\\b(START|UNSTOP|SUBSCRIBE|YES)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern HELP_PATTERN = Pattern.compile("\\b(HELP|INFO|SUPPORT)\\b", Pattern.CASE_INSENSITIVE);
+
+    // Special marker to indicate Twilio should handle the auto-response
+    private static final String TWILIO_HANDLED_MARKER = "__TWILIO_HANDLED__";
 
     /**
      * Handle inbound SMS messages from Twilio
@@ -68,28 +74,21 @@ public class SmsInboundWebhookController {
 
             if (customerOpt.isEmpty()) {
                 log.warn("Customer not found for phone number: {}", maskPhoneNumber(fromNumber));
+                // Send response to unknown numbers
+                sendUnknownNumberResponse(fromNumber);
                 return ResponseEntity.ok("Customer not found");
             }
 
             Customer customer = customerOpt.get();
 
-            // Process STOP/START keywords
-            if (messageBody.toUpperCase().contains("STOP")) {
-                customer.recordSmsOptOut(Customer.SmsOptOutMethod.STOP_REPLY);
-                customerRepository.save(customer);
+            // Process keyword commands and get response
+            String response = processKeywordCommand(customer, messageBody);
 
-                // Send required STOP response
-                String response = String.format("STOP: You have been unsubscribed from %s SMS messages. Reply START to resubscribe.",
-                        customer.getBusiness().getName());
-                // Send auto-reply here using your SMS service
-
-            } else if (messageBody.toUpperCase().contains("START")) {
-                customer.recordSmsOptIn(Customer.SmsOptInMethod.DOUBLE_OPT_IN, "sms_start_reply");
-                customerRepository.save(customer);
-
-                String response = String.format("Welcome back! You are resubscribed to %s SMS. Reply STOP to opt out.",
-                        customer.getBusiness().getName());
-                // Send auto-reply here
+            // UPDATED: Avoid double replies for STOP/HELP when Twilio handles them automatically
+            if (response != null && !response.isEmpty() && !TWILIO_HANDLED_MARKER.equals(response)) {
+                sendAutoReply(fromNumber, response);
+            } else if (TWILIO_HANDLED_MARKER.equals(response)) {
+                log.info("Twilio will handle auto-response for keyword message from {}", maskPhoneNumber(fromNumber));
             }
 
             return ResponseEntity.ok("Message processed");
@@ -128,6 +127,7 @@ public class SmsInboundWebhookController {
 
     /**
      * Handle STOP command - opt customer out of SMS
+     * UPDATED: Return TWILIO_HANDLED_MARKER to avoid double responses for toll-free numbers
      */
     private String handleStopCommand(Customer customer) {
         try {
@@ -137,10 +137,17 @@ public class SmsInboundWebhookController {
 
             log.info("✅ Customer {} opted out via STOP command", customer.getId());
 
-            // Required STOP response per carrier guidelines
+            // UPDATED: Let Twilio handle STOP responses for toll-free/10DLC numbers
+            // If you're using Advanced Opt-Out in your Messaging Service, return the marker
+            // If you want to handle it yourself, uncomment the return statement below
+            return TWILIO_HANDLED_MARKER;
+
+            // Uncomment below if you want to handle STOP responses manually:
+            /*
             return String.format("STOP: You have been unsubscribed from %s SMS messages. " +
                     "You will not receive any more texts from this number. " +
                     "Reply START to resubscribe. Msg&data rates may apply.", businessName);
+            */
 
         } catch (Exception e) {
             log.error("Error processing STOP command for customer {}: {}", customer.getId(), e.getMessage());
@@ -159,8 +166,9 @@ public class SmsInboundWebhookController {
 
             log.info("✅ Customer {} opted back in via START command", customer.getId());
 
+            // UPDATED: Compliance-friendly START response with business name and rates disclosure
             return String.format("Welcome back! You have been resubscribed to %s SMS messages. " +
-                            "Reply STOP to unsubscribe. Msg&data rates may apply. Support: %s",
+                            "Reply STOP to unsubscribe, HELP for help. Msg&data rates may apply. Support: %s",
                     businessName, supportPhone);
 
         } catch (Exception e) {
@@ -171,12 +179,20 @@ public class SmsInboundWebhookController {
 
     /**
      * Handle HELP command - provide assistance information
+     * UPDATED: Return TWILIO_HANDLED_MARKER for toll-free numbers with Advanced Opt-Out
      */
     private String handleHelpCommand(Customer customer) {
+        // UPDATED: Let Twilio handle HELP responses for toll-free/10DLC numbers
+        // If you're using Advanced Opt-Out, Twilio will send its own HELP response
+        return TWILIO_HANDLED_MARKER;
+
+        // Uncomment below if you want to handle HELP responses manually:
+        /*
         return String.format("%s Support: Reply STOP to unsubscribe, START to resubscribe. " +
                         "We send review requests to help improve our service. " +
-                        "Questions? Call %s or email support@reputul.com. Msg&data rates may apply.",
-                businessName, supportPhone);
+                        "Questions? Call %s or email %s. Msg&data rates may apply.",
+                businessName, supportPhone, supportEmail);
+        */
     }
 
     /**
@@ -190,13 +206,14 @@ public class SmsInboundWebhookController {
 
     /**
      * Send response to unknown phone numbers
+     * UPDATED: Include business name and compliance language
      */
     private void sendUnknownNumberResponse(String phoneNumber) {
         try {
             String message = String.format("Hi! This is %s customer service. " +
                             "We don't have your number in our system. " +
-                            "For support, please call %s. Msg&data rates may apply.",
-                    businessName, supportPhone);
+                            "For support, please call %s or email %s. Msg&data rates may apply.",
+                    businessName, supportPhone, supportEmail);
 
             sendAutoReply(phoneNumber, message);
 
@@ -270,7 +287,8 @@ public class SmsInboundWebhookController {
                 "status", "healthy",
                 "service", "sms-inbound-webhook",
                 "timestamp", OffsetDateTime.now(ZoneOffset.UTC),
-                "supportedKeywords", new String[]{"STOP", "START", "HELP"}
+                "supportedKeywords", new String[]{"STOP", "START", "HELP"},
+                "expandedStopKeywords", "STOP, STOPALL, CANCEL, END, QUIT, UNSUBSCRIBE, REMOVE, REVOKE, OPTOUT"
         ));
     }
 
@@ -283,12 +301,15 @@ public class SmsInboundWebhookController {
                 "inboundUrl", "/api/webhooks/sms/inbound",
                 "businessName", businessName,
                 "supportPhone", supportPhone,
+                "supportEmail", supportEmail,
                 "fromNumber", fromPhoneNumber,
                 "supportedCommands", Map.of(
-                        "STOP", "STOP, CANCEL, END, QUIT, UNSUBSCRIBE, REMOVE",
+                        "STOP", "STOP, STOPALL, CANCEL, END, QUIT, UNSUBSCRIBE, REMOVE, REVOKE, OPTOUT",
                         "START", "START, UNSTOP, SUBSCRIBE, YES",
                         "HELP", "HELP, INFO, SUPPORT"
-                )
+                ),
+                "twilioHandlesAutoReply", true,
+                "advancedOptOutEnabled", true
         ));
     }
 }

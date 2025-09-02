@@ -11,27 +11,33 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class CustomerStatsDto {
 
-    // Basic counts (changed to long to match repository return types)
-    private long totalCustomers;
-    private long completedServices;
-    private long pendingServices;
-    private long cancelledServices;
-    private long repeatCustomers;
-    private int thisMonthCustomers; // int since it's from .size()
+    // Basic customer metrics
+    private Long totalCustomers;
+    private Long customersWithPhone;
+    private Long completedServices;
+    private Long pendingServices;
+    private Long cancelledServices;
+    private Long repeatCustomers;
+    private Long thisMonthCustomers;
 
-    // Plan limits
-    private Integer maxCustomers;
-    private boolean atLimit;
-    private boolean canAddMore;
-    private String currentPlan;
+    // SMS consent metrics
+    private Long smsOptedIn;
+    private Long smsOptedOut;
+    private Long smsEligible;
+    private Long needingSmsConsent;
 
-    // Usage breakdown
-    private int newThisMonth;
-    private int activeCustomers;
-    private int smsOptedIn;
-    private int emailOptedIn;
+    // Calculated percentages
+    public Double getSmsOptInRate() {
+        if (customersWithPhone == null || customersWithPhone == 0) {
+            return 0.0;
+        }
+        return (smsOptedIn != null ? smsOptedIn.doubleValue() : 0.0) / customersWithPhone.doubleValue() * 100.0;
+    }
 
-    // Plan upgrade suggestion
-    private String upgradeMessage;
-    private String upgradeUrl;
+    public Double getSmsEligibilityRate() {
+        if (totalCustomers == null || totalCustomers == 0) {
+            return 0.0;
+        }
+        return (smsEligible != null ? smsEligible.doubleValue() : 0.0) / totalCustomers.doubleValue() * 100.0;
+    }
 }
