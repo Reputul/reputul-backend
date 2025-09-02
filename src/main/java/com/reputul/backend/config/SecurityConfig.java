@@ -66,6 +66,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/customers/**").permitAll()
                         .requestMatchers("/api/review-requests/send-direct").permitAll()
 
+                        // **NEW: SMS endpoints - MUST be public for Twilio compliance**
+                        .requestMatchers("/api/sms-samples/**").permitAll()
+                        .requestMatchers("/api/sms-signup/**").permitAll()
+
                         // **CRITICAL: Stripe webhook endpoints - MUST be public**
                         .requestMatchers(HttpMethod.POST, "/api/billing/webhook/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/billing/webhook/**").permitAll()

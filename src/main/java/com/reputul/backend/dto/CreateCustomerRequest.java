@@ -24,4 +24,12 @@ public class CreateCustomerRequest {
     private List<Customer.CustomerTag> tags;
     private String notes;
     private Long businessId;
+
+    // NEW: SMS Consent fields for TCPA compliance
+    private Boolean smsOptIn;
+    private Boolean smsOptOut;
+
+    // Optional: SMS opt-in metadata (mainly for frontend to set method)
+    private Customer.SmsOptInMethod smsOptInMethod;
+    private String smsOptInSource;
 }

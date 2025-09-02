@@ -4,6 +4,7 @@ import com.reputul.backend.dto.BusinessResponseDto;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
+import com.reputul.backend.repositories.ReviewRepository; // ADDED: Need review repository for counting
 import com.reputul.backend.repositories.UserRepository;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -17,10 +18,13 @@ public class DashboardController {
 
     private final BusinessRepository businessRepo;
     private final UserRepository userRepo;
+    private final ReviewRepository reviewRepo; // ADDED: For efficient review counting
 
-    public DashboardController(BusinessRepository businessRepo, UserRepository userRepo) {
+    // UPDATED: Added reviewRepo dependency injection
+    public DashboardController(BusinessRepository businessRepo, UserRepository userRepo, ReviewRepository reviewRepo) {
         this.businessRepo = businessRepo;
         this.userRepo = userRepo;
+        this.reviewRepo = reviewRepo; // ADDED: Inject review repository
     }
 
     @GetMapping
@@ -39,8 +43,10 @@ public class DashboardController {
                 .address(b.getAddress())
                 .reputationScore(b.getReputationScore())
                 .badge(b.getBadge())
-                .reviewCount(b.getReviews() != null ? b.getReviews().size() : 0)
-                .reviewPlatformsConfigured(b.getReviewPlatformsConfigured()) // ADD THIS LINE!
+                // FIXED: Use efficient count query instead of loading entire reviews collection
+                // This prevents LazyInitializationException and improves performance
+                .reviewCount((int) reviewRepo.countByBusinessId(b.getId()))
+                .reviewPlatformsConfigured(b.getReviewPlatformsConfigured())
                 .build()
         ).toList();
     }
