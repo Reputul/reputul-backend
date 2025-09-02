@@ -56,7 +56,7 @@ public class SmsVerificationSamplesController {
 
             Customer mockCustomer = Customer.builder()
                     .name(customerName + " Smith")
-                    .phone("+15551234567")
+                    .phone("+14078185210")
                     .serviceType(serviceType)
                     .business(mockBusiness)
                     .smsOptIn(true)
