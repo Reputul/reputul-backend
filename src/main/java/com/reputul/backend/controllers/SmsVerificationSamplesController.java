@@ -27,10 +27,10 @@ public class SmsVerificationSamplesController {
     @Value("${app.business.name:Your Business}")
     private String defaultBusinessName;
 
-    @Value("${app.support.phone:1-800-555-0199}")
+    @Value("${app.support.phone:}")
     private String supportPhone;
 
-    @Value("${app.support.email:support@yourdomain.com}")
+    @Value("${app.support.email:support@reputul.com}")
     private String supportEmail;
 
     @Value("${app.base.url:https://app.reputul.com}")
@@ -100,8 +100,8 @@ public class SmsVerificationSamplesController {
             ));
 
             samples.put("helpResponse", Map.of(
-                    "message", String.format("%s support: %s %s. Reply STOP to opt out. " +
-                            "Msg & data rates may apply.", businessName, supportPhone, supportEmail),
+                    "message", String.format("%s support: Email %s for assistance. Reply STOP to opt out. " +
+                            "Msg & data rates may apply.", businessName, supportEmail),
                     "description", "Automatic response to HELP keyword (only if not using Twilio Advanced Opt-Out)",
                     "frequency", "As needed when customers reply HELP"
             ));
@@ -109,21 +109,26 @@ public class SmsVerificationSamplesController {
             samples.put("startResponse", Map.of(
                     "message", String.format("Welcome back! You have been resubscribed to %s SMS messages. " +
                                     "Reply STOP to unsubscribe, HELP for help. Msg&data rates may apply. Support: %s",
-                            businessName, supportPhone),
+                            businessName, supportEmail),
                     "description", "Welcome message when customers reply START to opt back in",
                     "frequency", "As needed when customers reply START"
             ));
 
             // 5. Business information for submission
-            samples.put("businessInfo", Map.of(
-                    "businessName", businessName,
-                    "supportPhone", supportPhone,
-                    "supportEmail", supportEmail,
-                    "websiteUrl", baseUrl,
-                    "useCase", "Transactional review requests and customer service notifications",
-                    "messageFrequency", "1-3 messages per customer per month",
-                    "optInMethod", "Web form with explicit consent checkbox + double opt-in confirmation"
-            ));
+            Map<String, Object> businessInfo = new HashMap<>();
+            businessInfo.put("businessName", businessName);
+            businessInfo.put("supportEmail", supportEmail);
+            businessInfo.put("websiteUrl", baseUrl);
+            businessInfo.put("useCase", "Transactional review requests and customer service notifications");
+            businessInfo.put("messageFrequency", "1-3 messages per customer per month");
+            businessInfo.put("optInMethod", "Web form with explicit consent checkbox + double opt-in confirmation");
+
+            // Only include supportPhone if it's not empty
+            if (supportPhone != null && !supportPhone.trim().isEmpty()) {
+                businessInfo.put("supportPhone", supportPhone);
+            }
+
+            samples.put("businessInfo", businessInfo);
 
             // 6. Compliance validation
             samples.put("complianceCheck", Map.of(

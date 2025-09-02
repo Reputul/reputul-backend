@@ -120,8 +120,12 @@ public class SmsTemplateService {
         variables.put("serviceType", customer.getServiceType() != null ? customer.getServiceType() : "service");
 
         // Contact info
-        variables.put("supportPhone", supportPhone);
         variables.put("supportEmail", supportEmail);
+
+        // Only include supportPhone if it's not empty
+        if (supportPhone != null && !supportPhone.trim().isEmpty()) {
+            variables.put("supportPhone", supportPhone);
+        }
 
         // Generate branded review URL (no public shorteners per Twilio guidelines)
         String reviewUrl = generateBrandedReviewUrl(customer);
