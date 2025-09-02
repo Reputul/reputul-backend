@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -169,7 +170,7 @@ public class SmsInboundWebhookController {
             // UPDATED: Compliance-friendly START response with business name and rates disclosure
             return String.format("Welcome back! You have been resubscribed to %s SMS messages. " +
                             "Reply STOP to unsubscribe, HELP for help. Msg&data rates may apply. Support: %s",
-                    businessName, supportPhone);
+                    businessName, supportEmail);
 
         } catch (Exception e) {
             log.error("Error processing START command for customer {}: {}", customer.getId(), e.getMessage());
@@ -201,7 +202,7 @@ public class SmsInboundWebhookController {
     private String getGeneralHelpResponse(Customer customer) {
         return String.format("Hi %s! Thanks for your message. For review requests from %s, " +
                         "reply HELP for info, STOP to unsubscribe. Support: %s",
-                customer.getName().split(" ")[0], businessName, supportPhone);
+                customer.getName().split(" ")[0], businessName, supportEmail);
     }
 
     /**
@@ -212,8 +213,8 @@ public class SmsInboundWebhookController {
         try {
             String message = String.format("Hi! This is %s customer service. " +
                             "We don't have your number in our system. " +
-                            "For support, please call %s or email %s. Msg&data rates may apply.",
-                    businessName, supportPhone, supportEmail);
+                            "For support, please email %s. Msg&data rates may apply.",
+                    businessName, supportEmail);
 
             sendAutoReply(phoneNumber, message);
 
@@ -297,19 +298,24 @@ public class SmsInboundWebhookController {
      */
     @GetMapping("/inbound/config")
     public ResponseEntity<Map<String, Object>> getInboundConfig() {
-        return ResponseEntity.ok(Map.of(
-                "inboundUrl", "/api/webhooks/sms/inbound",
-                "businessName", businessName,
-                "supportPhone", supportPhone,
-                "supportEmail", supportEmail,
-                "fromNumber", fromPhoneNumber,
-                "supportedCommands", Map.of(
-                        "STOP", "STOP, STOPALL, CANCEL, END, QUIT, UNSUBSCRIBE, REMOVE, REVOKE, OPTOUT",
-                        "START", "START, UNSTOP, SUBSCRIBE, YES",
-                        "HELP", "HELP, INFO, SUPPORT"
-                ),
-                "twilioHandlesAutoReply", true,
-                "advancedOptOutEnabled", true
+        Map<String, Object> config = new HashMap<>();
+        config.put("inboundUrl", "/api/webhooks/sms/inbound");
+        config.put("businessName", businessName);
+        config.put("supportEmail", supportEmail);
+        config.put("fromNumber", fromPhoneNumber);
+        config.put("supportedCommands", Map.of(
+                "STOP", "STOP, STOPALL, CANCEL, END, QUIT, UNSUBSCRIBE, REMOVE, REVOKE, OPTOUT",
+                "START", "START, UNSTOP, SUBSCRIBE, YES",
+                "HELP", "HELP, INFO, SUPPORT"
         ));
+        config.put("twilioHandlesAutoReply", true);
+        config.put("advancedOptOutEnabled", true);
+
+        // Only include supportPhone if it's not empty
+        if (supportPhone != null && !supportPhone.trim().isEmpty()) {
+            config.put("supportPhone", supportPhone);
+        }
+
+        return ResponseEntity.ok(config);
     }
 }
