@@ -206,6 +206,8 @@ public class Customer {
 
     public enum SmsOptInMethod {
         WEB_FORM("Web Form"),
+        SMS_YES_REPLY("SMS YES Reply"),       // user replied YES to confirm (double opt-in)
+        SMS_START_REPLY("SMS START Reply"),
         PHONE_CALL("Phone Call"),
         EMAIL_REPLY("Email Reply"),
         IMPORT("Data Import"),
