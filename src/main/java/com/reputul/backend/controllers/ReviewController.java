@@ -122,30 +122,6 @@ public class ReviewController {
         }
     }
 
-    // ✅ Public-facing review submission (unauthenticated)
-    @PostMapping("/public/{businessId}")
-    public ResponseEntity<?> createPublicReview(
-            @PathVariable Long businessId,
-            @RequestBody Review review
-    ) {
-        return businessRepo.findById(businessId)
-                .map(business -> {
-                    if (review.getRating() < 1 || review.getRating() > 5) {
-                        return ResponseEntity.badRequest().body("Rating must be between 1 and 5.");
-                    }
-
-                    review.setBusiness(business);
-                    review.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-                    review.setSource("public"); // Mark as public submission
-                    reviewRepo.save(review);
-
-                    reputationService.updateBusinessReputationAndBadge(businessId);
-
-                    return ResponseEntity.ok("Review submitted successfully.");
-                })
-                .orElse(ResponseEntity.notFound().build());
-    }
-
     // ✅ All reviews for a specific business (with sorting)
     @GetMapping("/business/{businessId}")
     public List<Review> getReviewsByBusiness(
