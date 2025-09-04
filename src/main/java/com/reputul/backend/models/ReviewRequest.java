@@ -33,7 +33,7 @@ public class ReviewRequest {
     @JoinColumn(name = "email_template_id", nullable = false)
     private EmailTemplate emailTemplate;
 
-    // NEW: Delivery method support
+    // Delivery method support
     @Enumerated(EnumType.STRING)
     @Column(name = "delivery_method", nullable = false)
     private DeliveryMethod deliveryMethod = DeliveryMethod.EMAIL;
@@ -41,7 +41,7 @@ public class ReviewRequest {
     @Column(name = "recipient_email", nullable = false)
     private String recipientEmail;
 
-    // NEW: SMS recipient tracking
+    // SMS recipient tracking
     @Column(name = "recipient_phone")
     private String recipientPhone;
 
@@ -51,7 +51,7 @@ public class ReviewRequest {
     @Column(name = "email_body", columnDefinition = "TEXT")
     private String emailBody;
 
-    // NEW: SMS message content
+    // SMS message content
     @Column(name = "sms_message", columnDefinition = "TEXT")
     private String smsMessage;
 
@@ -74,6 +74,10 @@ public class ReviewRequest {
     @Column(name = "reviewed_at")
     private OffsetDateTime reviewedAt;
 
+    // NEW: Email delivery tracking
+    @Column(name = "delivered_at")
+    private OffsetDateTime deliveredAt;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 
@@ -83,7 +87,7 @@ public class ReviewRequest {
     @Column(name = "error_message")
     private String errorMessage;
 
-    // NEW: SMS-specific tracking fields
+    // SMS-specific tracking fields
     @Column(name = "sms_message_id")
     private String smsMessageId; // Twilio SID
 
@@ -92,6 +96,16 @@ public class ReviewRequest {
 
     @Column(name = "sms_error_code")
     private String smsErrorCode;
+
+    // NEW: Email-specific tracking fields
+    @Column(name = "sendgrid_message_id")
+    private String sendgridMessageId; // SendGrid message ID
+
+    @Column(name = "email_status")
+    private String emailStatus; // processed, delivered, open, click, bounce, etc.
+
+    @Column(name = "email_error_code")
+    private String emailErrorCode;
 
     @PrePersist
     protected void onCreate() {
@@ -103,7 +117,7 @@ public class ReviewRequest {
         updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
-    // NEW: Delivery method enum
+    // Delivery method enum
     public enum DeliveryMethod {
         EMAIL("Email"),
         SMS("SMS");
@@ -122,7 +136,7 @@ public class ReviewRequest {
     public enum RequestStatus {
         PENDING,     // Created but not sent yet
         SENT,        // Successfully sent via email/SMS service
-        DELIVERED,   // Confirmed delivered (if we have webhook data)
+        DELIVERED,   // Confirmed delivered (webhook data)
         OPENED,      // Email was opened by recipient
         CLICKED,     // Review link was clicked
         COMPLETED,   // Review was submitted
@@ -147,5 +161,15 @@ public class ReviewRequest {
     // Helper method to get the appropriate message content
     public String getMessageContent() {
         return isSmsDelivery() ? smsMessage : emailBody;
+    }
+
+    // NEW: Helper method to get the appropriate message ID for tracking
+    public String getMessageId() {
+        return isSmsDelivery() ? smsMessageId : sendgridMessageId;
+    }
+
+    // NEW: Helper method to get the appropriate status for tracking
+    public String getDeliveryStatus() {
+        return isSmsDelivery() ? smsStatus : emailStatus;
     }
 }
