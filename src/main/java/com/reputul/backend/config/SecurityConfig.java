@@ -48,6 +48,7 @@ public class SecurityConfig {
                         // Public endpoints - no authentication required
                         .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/health/**").permitAll()
+                        .requestMatchers("/api/test/**").permitAll()
 
                         // Authentication endpoints
                         .requestMatchers("/api/auth/**").permitAll()
