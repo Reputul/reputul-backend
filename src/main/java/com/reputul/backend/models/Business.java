@@ -25,7 +25,34 @@ public class Business {
     private String phone;
     private String website;
     private String address;
+
+    // Legacy reputation score (kept for backward compatibility)
     private Double reputationScore;
+
+    // NEW: Enhanced Wilson Score reputation fields
+    @Column(name = "reputul_rating")
+    @Builder.Default
+    private Double reputulRating = 0.0;
+
+    @Column(name = "reputation_score_quality")
+    @Builder.Default
+    private Double reputationScoreQuality = 0.0;
+
+    @Column(name = "reputation_score_velocity")
+    @Builder.Default
+    private Double reputationScoreVelocity = 0.0;
+
+    @Column(name = "reputation_score_responsiveness")
+    @Builder.Default
+    private Double reputationScoreResponsiveness = 0.0;
+
+    @Column(name = "reputation_score_composite")
+    @Builder.Default
+    private Double reputationScoreComposite = 0.0;
+
+    @Column(name = "last_reputation_update")
+    private OffsetDateTime lastReputationUpdate;
+
     private String badge;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
@@ -70,7 +97,7 @@ public class Business {
         updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
-    // ===== ADDED: Helper methods =====
+    // ===== EXISTING: Helper methods =====
     public boolean belongsToOrganization(Long organizationId) {
         return organization != null && organization.getId().equals(organizationId);
     }
@@ -88,5 +115,40 @@ public class Business {
             return organization.getId().equals(checkUser.getOrganization().getId());
         }
         return false;
+    }
+
+    // ===== NEW: Wilson Score helper methods =====
+
+    /**
+     * Get the primary public rating (Wilson Score if available, fallback to legacy)
+     */
+    public double getPublicRating() {
+        return reputulRating != null && reputulRating > 0 ? reputulRating :
+                (reputationScore != null ? Math.min(reputationScore / 20.0, 5.0) : 0.0);
+    }
+
+    /**
+     * Get the owner-facing composite score (0-100)
+     */
+    public double getOwnerScore() {
+        return reputationScoreComposite != null ? reputationScoreComposite :
+                (reputationScore != null ? reputationScore : 0.0);
+    }
+
+    /**
+     * Check if Wilson Score metrics have been calculated
+     */
+    public boolean hasWilsonScoreMetrics() {
+        return reputulRating != null && reputulRating > 0 && lastReputationUpdate != null;
+    }
+
+    /**
+     * Get reputation color band for UI display
+     */
+    public String getReputationColorBand() {
+        double score = getOwnerScore();
+        if (score >= 76) return "green";
+        if (score >= 46) return "yellow";
+        return "red";
     }
 }
