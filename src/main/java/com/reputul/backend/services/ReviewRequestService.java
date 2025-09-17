@@ -7,6 +7,7 @@ import com.reputul.backend.models.*;
 import com.reputul.backend.repositories.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.context.annotation.Lazy;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +32,10 @@ public class ReviewRequestService {
     private final EmailTemplateService emailTemplateService;
     private final SmsService smsService;
     private final SmsTemplateService smsTemplateService;
+
+    // ADDED: AutomationIntegration for automated workflows
+    @Autowired
+    @Lazy private AutomationIntegration automationIntegration;
 
     @Transactional
     public ReviewRequestDto sendReviewRequest(User user, SendReviewRequestDto request) {
@@ -415,7 +421,11 @@ public class ReviewRequestService {
         switch (status) {
             case OPENED -> request.setOpenedAt(OffsetDateTime.now(ZoneOffset.UTC));
             case CLICKED -> request.setClickedAt(OffsetDateTime.now(ZoneOffset.UTC));
-            case COMPLETED -> request.setReviewedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            case COMPLETED -> {
+                request.setReviewedAt(OffsetDateTime.now(ZoneOffset.UTC));
+                // ADDED: Trigger automation integration when review request is completed
+                automationIntegration.onReviewRequestCompleted(request);
+            }
         }
 
         request = reviewRequestRepository.save(request);
@@ -566,5 +576,13 @@ public class ReviewRequestService {
                 .smsMessageId(request.getSmsMessageId()) // NEW: Add Twilio SID
                 .smsStatus(request.getSmsStatus()) // NEW: Add SMS status
                 .build();
+    }
+
+    /**
+     * Check if customer has responded to any review requests
+     */
+    public boolean hasCustomerResponded(Customer customer) {
+        return reviewRequestRepository.existsByCustomerAndStatus(
+                customer, ReviewRequest.RequestStatus.COMPLETED);
     }
 }
