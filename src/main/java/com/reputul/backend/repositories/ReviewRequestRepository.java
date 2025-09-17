@@ -348,18 +348,4 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
      */
     @Query("DELETE FROM ReviewRequest r WHERE r.status = 'PENDING' AND r.createdAt < :cutoffDate")
     void deleteOldPendingRequests(@Param("cutoffDate") OffsetDateTime cutoffDate);
-
-    /**
-     * Check if customer has any completed review requests
-     */
-    boolean existsByCustomerAndStatus(Customer customer, ReviewRequest.RequestStatus status);
-
-    /**
-     * Check if customer has any review requests since a specific date
-     */
-    @Query("SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END " +
-            "FROM ReviewRequest r WHERE r.customer.id = :customerId " +
-            "AND r.createdAt >= :since")
-    boolean hasRecentRequests(@Param("customerId") Long customerId,
-                              @Param("since") OffsetDateTime since);
 }

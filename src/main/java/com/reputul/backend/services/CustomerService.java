@@ -10,7 +10,6 @@ import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.CustomerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,8 +25,6 @@ public class CustomerService {
 
     private final CustomerRepository customerRepository;
     private final BusinessRepository businessRepository;
-    @Autowired
-    private AutomationIntegration automationIntegration;
 
     public List<CustomerDto> getAllCustomersByUser(User user) {
         List<Customer> customers = customerRepository.findByUserOrderByCreatedAtDesc(user);
@@ -89,9 +86,6 @@ public class CustomerService {
 
         Customer savedCustomer = customerRepository.save(customer);
         log.info("Created new customer: {} (SMS Opt-In: {})", savedCustomer.getName(), savedCustomer.getSmsOptIn());
-
-        // ADDED: Trigger automation integration for new customer
-        automationIntegration.onCustomerCreated(savedCustomer);
 
         return convertToDto(savedCustomer);
     }
