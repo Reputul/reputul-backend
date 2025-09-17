@@ -10,16 +10,15 @@ import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * AutomationTriggerService
- *
- * Handles triggering automation workflows from business events
- * Integrates with existing services to automatically start workflows
+ * AutomationTriggerService with smart workflow timing
  */
 @Service
 @RequiredArgsConstructor
@@ -28,45 +27,36 @@ public class AutomationTriggerService {
 
     private final AutomationWorkflowRepository workflowRepository;
     private final AutomationSchedulerService schedulerService;
-    private final MeterRegistry meterRegistry;
     private final CustomerRepository customerRepository;
+    private final MeterRegistry meterRegistry;
 
     /**
-     * Trigger automation when a customer is created
+     * Smart trigger for customer creation - only triggers if work is actually done
      */
+    @Transactional
     public void onCustomerCreated(Customer customer) {
         log.info("Processing automation triggers for new customer: {} (ID: {})",
                 customer.getName(), customer.getId());
 
         try {
-            List<AutomationWorkflow> workflows = workflowRepository
-                    .findByOrganizationAndTriggerTypeAndIsActiveTrueOrderByCreatedAtDesc(
-                            customer.getUser().getOrganization(),
-                            AutomationWorkflow.TriggerType.CUSTOMER_CREATED);
-
-            Map<String, Object> triggerData = Map.of(
-                    "customer_name", customer.getName(),
-                    "customer_email", customer.getEmail() != null ? customer.getEmail() : "",
-                    "service_type", customer.getServiceType() != null ? customer.getServiceType() : "",
-                    "business_id", customer.getBusiness().getId(),
-                    "created_by", "customer_service"
-            );
-
-            for (AutomationWorkflow workflow : workflows) {
-                try {
-                    if (shouldTriggerWorkflow(workflow, customer, triggerData)) {
-                        schedulerService.scheduleFromTriggerConfig(
-                                workflow, customer.getId(), "CUSTOMER_CREATED", triggerData);
-
-                        recordTriggerMetric("CUSTOMER_CREATED", workflow.getId(), true);
-                        log.info("Triggered workflow '{}' for customer {}", workflow.getName(), customer.getId());
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to trigger workflow {} for customer {}: {}",
-                            workflow.getId(), customer.getId(), e.getMessage());
-                    recordTriggerMetric("CUSTOMER_CREATED", workflow.getId(), false);
-                }
+            // SMART LOGIC: Only trigger if customer is ready for automation
+            if (!shouldTriggerAutomationForCustomer(customer)) {
+                log.info("Skipping automation for customer {} - not ready (status: {}, service date: {}, ready flag: {})",
+                        customer.getId(), customer.getStatus(), customer.getServiceDate(), customer.getReadyForAutomation());
+                return;
             }
+
+            // Prevent duplicate triggers
+            if (Boolean.TRUE.equals(customer.getAutomationTriggered())) {
+                log.info("Automation already triggered for customer {}", customer.getId());
+                return;
+            }
+
+            triggerWorkflowsForCustomer(customer, "CUSTOMER_CREATED");
+
+            // Mark automation as triggered
+            customer.markAutomationTriggered();
+            customerRepository.save(customer);
 
         } catch (Exception e) {
             log.error("Error processing customer created triggers for customer {}: {}",
@@ -75,42 +65,28 @@ public class AutomationTriggerService {
     }
 
     /**
-     * Trigger automation when a service is completed
+     * Trigger automation when service is explicitly completed
      */
+    @Transactional
     public void onServiceCompleted(Customer customer, String serviceType) {
         log.info("Processing automation triggers for service completion: customer {} (service: {})",
                 customer.getName(), serviceType);
 
         try {
-            List<AutomationWorkflow> workflows = workflowRepository
-                    .findByOrganizationAndTriggerTypeAndIsActiveTrueOrderByCreatedAtDesc(
-                            customer.getUser().getOrganization(),
-                            AutomationWorkflow.TriggerType.SERVICE_COMPLETED);
+            // Mark customer as service completed
+            customer.markServiceCompleted();
+            customerRepository.save(customer);
 
-            Map<String, Object> triggerData = Map.of(
-                    "customer_name", customer.getName(),
-                    "customer_email", customer.getEmail() != null ? customer.getEmail() : "",
-                    "service_type", serviceType,
-                    "business_id", customer.getBusiness().getId(),
-                    "completion_date", java.time.OffsetDateTime.now().toString(),
-                    "triggered_by", "service_completion"
-            );
+            // Trigger workflows if not already done
+            if (!Boolean.TRUE.equals(customer.getAutomationTriggered())) {
+                triggerWorkflowsForCustomer(customer, "SERVICE_COMPLETED", Map.of(
+                        "service_type", serviceType,
+                        "completion_date", customer.getServiceCompletedDate().toString(),
+                        "triggered_by", "service_completion"
+                ));
 
-            for (AutomationWorkflow workflow : workflows) {
-                try {
-                    if (shouldTriggerWorkflow(workflow, customer, triggerData)) {
-                        schedulerService.scheduleFromTriggerConfig(
-                                workflow, customer.getId(), "SERVICE_COMPLETED", triggerData);
-
-                        recordTriggerMetric("SERVICE_COMPLETED", workflow.getId(), true);
-                        log.info("Triggered workflow '{}' for service completion: customer {}",
-                                workflow.getName(), customer.getId());
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to trigger workflow {} for service completion {}: {}",
-                            workflow.getId(), customer.getId(), e.getMessage());
-                    recordTriggerMetric("SERVICE_COMPLETED", workflow.getId(), false);
-                }
+                customer.markAutomationTriggered();
+                customerRepository.save(customer);
             }
 
         } catch (Exception e) {
@@ -120,8 +96,9 @@ public class AutomationTriggerService {
     }
 
     /**
-     * Trigger automation when a review request is completed
+     * Trigger automation when review request is completed
      */
+    @Transactional
     public void onReviewRequestCompleted(ReviewRequest reviewRequest) {
         Customer customer = reviewRequest.getCustomer();
         log.info("Processing automation triggers for completed review: customer {} (request: {})",
@@ -173,7 +150,7 @@ public class AutomationTriggerService {
         log.info("Processing webhook automation trigger: {} for customer {}", webhookKey, customerId);
 
         try {
-            Customer customer = getCustomerById(customerId);
+            Customer customer = customerRepository.findById(customerId).orElse(null);
             if (customer == null) {
                 log.warn("Customer not found for webhook trigger: {}", customerId);
                 return;
@@ -191,7 +168,6 @@ public class AutomationTriggerService {
 
             for (AutomationWorkflow workflow : workflows) {
                 try {
-                    // Check if this workflow should respond to this webhook key
                     if (matchesWebhookKey(workflow, webhookKey) &&
                             shouldTriggerWorkflow(workflow, customer, triggerData)) {
 
@@ -217,6 +193,58 @@ public class AutomationTriggerService {
     // =========================
     // HELPER METHODS
     // =========================
+
+    /**
+     * Determine if customer is ready for automation
+     */
+    private boolean shouldTriggerAutomationForCustomer(Customer customer) {
+        // Use the new smart logic in Customer entity
+        return customer.isReadyForAutomation();
+    }
+
+    /**
+     * Trigger workflows for a customer with specific event
+     */
+    private void triggerWorkflowsForCustomer(Customer customer, String triggerEvent) {
+        triggerWorkflowsForCustomer(customer, triggerEvent, Map.of());
+    }
+
+    private void triggerWorkflowsForCustomer(Customer customer, String triggerEvent, Map<String, Object> additionalData) {
+        try {
+            AutomationWorkflow.TriggerType triggerType = AutomationWorkflow.TriggerType.valueOf(triggerEvent);
+
+            List<AutomationWorkflow> workflows = workflowRepository
+                    .findByOrganizationAndTriggerTypeAndIsActiveTrueOrderByCreatedAtDesc(
+                            customer.getUser().getOrganization(), triggerType);
+
+            Map<String, Object> triggerData = new HashMap<>();
+            triggerData.put("customer_name", customer.getName());
+            triggerData.put("customer_email", customer.getEmail() != null ? customer.getEmail() : "");
+            triggerData.put("service_type", customer.getServiceType() != null ? customer.getServiceType() : "");
+            triggerData.put("business_id", customer.getBusiness().getId());
+            triggerData.put("created_by", "automation_system");
+            triggerData.putAll(additionalData);
+
+            for (AutomationWorkflow workflow : workflows) {
+                try {
+                    if (shouldTriggerWorkflow(workflow, customer, triggerData)) {
+                        schedulerService.scheduleFromTriggerConfig(
+                                workflow, customer.getId(), triggerEvent, triggerData);
+
+                        recordTriggerMetric(triggerEvent, workflow.getId(), true);
+                        log.info("Triggered workflow '{}' for customer {}", workflow.getName(), customer.getId());
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to trigger workflow {} for customer {}: {}",
+                            workflow.getId(), customer.getId(), e.getMessage());
+                    recordTriggerMetric(triggerEvent, workflow.getId(), false);
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error triggering workflows for customer {}: {}", customer.getId(), e.getMessage());
+        }
+    }
 
     /**
      * Check if workflow should be triggered for this customer
@@ -256,14 +284,6 @@ public class AutomationTriggerService {
                 }
             }
 
-            if (conditions.containsKey("max_executions_per_customer")) {
-                Integer maxExecutions = (Integer) conditions.get("max_executions_per_customer");
-                if (maxExecutions != null && maxExecutions > 0) {
-                    // TODO: Check execution count for this customer/workflow combination
-                    // For now, assume it's okay
-                }
-            }
-
             return true;
 
         } catch (Exception e) {
@@ -289,14 +309,6 @@ public class AutomationTriggerService {
         }
 
         return false;
-    }
-
-    /**
-     * Get customer by ID (placeholder - you might need to inject CustomerRepository)
-     */
-    private Customer getCustomerById(Long customerId) {
-        return customerRepository.findById(customerId)
-                .orElse(null);
     }
 
     /**
