@@ -1,6 +1,8 @@
 package com.reputul.backend.models.automation;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -22,30 +24,43 @@ public class WorkflowTemplate {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @NotBlank
+    @Size(max = 100)
+    @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(columnDefinition = "TEXT")
+    @NotBlank
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String description;
 
-    @Column
+    @NotBlank
+    @Size(max = 50)
+    @Column(nullable = false, length = 50)
     private String category;
 
     @Column(name = "is_active", nullable = false)
+    @Builder.Default
     private Boolean isActive = true;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "trigger_type", nullable = false)
+    @Column(name = "trigger_type", nullable = false, length = 50)
     private AutomationWorkflow.TriggerType triggerType;
 
-    // FIXED: Add @JdbcTypeCode annotation
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "template_config", columnDefinition = "jsonb")
+    @Column(name = "template_config", nullable = false, columnDefinition = "jsonb")
     private Map<String, Object> templateConfig;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "default_actions", columnDefinition = "jsonb")
     private Map<String, Object> defaultActions;
+
+    @Column(name = "is_system_template")
+    @Builder.Default
+    private Boolean isSystemTemplate = false;
+
+    @Column(name = "popularity_score")
+    @Builder.Default
+    private Integer popularityScore = 0;
 
     @CreationTimestamp
     @Column(name = "created_at")

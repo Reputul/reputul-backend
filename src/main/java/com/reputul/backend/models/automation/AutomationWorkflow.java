@@ -2,7 +2,13 @@ package com.reputul.backend.models.automation;
 
 import com.reputul.backend.models.Organization;
 import com.reputul.backend.models.Business;
+import com.reputul.backend.models.User;
+import com.reputul.backend.models.EmailTemplate;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -24,7 +30,9 @@ public class AutomationWorkflow {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @NotBlank
+    @Size(max = 100)
+    @Column(nullable = false, length = 100)
     private String name;
 
     @Column(columnDefinition = "TEXT")
@@ -38,26 +46,50 @@ public class AutomationWorkflow {
     @JoinColumn(name = "business_id")
     private Business business;
 
-    @Column(name = "is_active", nullable = false)
-    private Boolean isActive = true;
-
     @Enumerated(EnumType.STRING)
-    @Column(name = "trigger_type", nullable = false)
+    @Column(name = "trigger_type", nullable = false, length = 50)
     private TriggerType triggerType;
 
-    // FIXED: Add @JdbcTypeCode annotation for JSON mapping
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "trigger_config", columnDefinition = "jsonb")
+    @Column(name = "trigger_config", nullable = false, columnDefinition = "jsonb")
     private Map<String, Object> triggerConfig;
+
+    @Column(name = "is_active")
+    @Builder.Default
+    private Boolean isActive = true;
+
+    @Min(1)
+    @Column(name = "max_executions")
+    private Integer maxExecutions;
+
+    @Min(0)
+    @Column(name = "execution_count")
+    @Builder.Default
+    private Integer executionCount = 0;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_method", length = 20)
+    @Builder.Default
+    private DeliveryMethod deliveryMethod = DeliveryMethod.EMAIL;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "email_template_id")
+    private EmailTemplate emailTemplate;
+
+    @Column(name = "sms_template", columnDefinition = "TEXT")
+    private String smsTemplate;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "execution_window", columnDefinition = "jsonb")
+    private Map<String, Object> executionWindow;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "conditions", columnDefinition = "jsonb")
+    private Map<String, Object> conditions;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "actions", columnDefinition = "jsonb")
     private Map<String, Object> actions;
-
-    // REQUIRED: conditions field for workflow eligibility (used by TriggerProcessorService)
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "conditions", columnDefinition = "jsonb")
-    private Map<String, Object> conditions;
 
     @CreationTimestamp
     @Column(name = "created_at")
@@ -67,11 +99,24 @@ public class AutomationWorkflow {
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by")
+    private User createdBy;
+
     public enum TriggerType {
+        TIME_BASED,
+        EVENT_BASED,
+        MANUAL,
+        WEBHOOK,
         CUSTOMER_CREATED,
         SERVICE_COMPLETED,
         REVIEW_COMPLETED,
-        SCHEDULED,
-        WEBHOOK
+        SCHEDULED
+    }
+
+    public enum DeliveryMethod {
+        EMAIL,
+        SMS,
+        BOTH
     }
 }

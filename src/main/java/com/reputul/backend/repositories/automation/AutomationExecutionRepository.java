@@ -176,6 +176,12 @@ public interface AutomationExecutionRepository extends JpaRepository<AutomationE
             @Param("stuckThreshold") OffsetDateTime stuckThreshold,
             @Param("orgId") Long orgId);
 
+    /**
+     * Find executions by status and creation date
+     */
+    List<AutomationExecution> findByStatusAndCreatedAtBefore(
+            AutomationExecution.ExecutionStatus status, OffsetDateTime cutoffDate);
+
     // =========================
     // LEGACY METHODS (Keep for backward compatibility but mark as deprecated)
     // =========================
@@ -191,4 +197,5 @@ public interface AutomationExecutionRepository extends JpaRepository<AutomationE
      */
     @Deprecated
     List<AutomationExecution> findByCustomerOrderByCreatedAtDesc(Customer customer);
+
 }

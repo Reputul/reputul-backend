@@ -1,7 +1,10 @@
 package com.reputul.backend.models.automation;
 
 import com.reputul.backend.models.Customer;
+import com.reputul.backend.models.Business;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -28,33 +31,62 @@ public class AutomationExecution {
     private AutomationWorkflow workflow;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "customer_id")
+    @JoinColumn(name = "customer_id", nullable = false)
     private Customer customer;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    private ExecutionStatus status = ExecutionStatus.PENDING;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "business_id", nullable = false)
+    private Business business;
 
-    @Column(name = "trigger_event")
+    @Column(name = "trigger_event", nullable = false, length = 100)
     private String triggerEvent;
 
-    // FIXED: Add @JdbcTypeCode annotation
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "trigger_data", columnDefinition = "jsonb")
     private Map<String, Object> triggerData;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "execution_data", columnDefinition = "jsonb")
-    private Map<String, Object> executionData;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 50)
+    @Builder.Default
+    private ExecutionStatus status = ExecutionStatus.PENDING;
 
-    @Column(name = "error_message")
-    private String errorMessage;
+    @Min(1)
+    @Column(name = "current_step")
+    @Builder.Default
+    private Integer currentStep = 1;
+
+    @Column(name = "scheduled_for")
+    private OffsetDateTime scheduledFor;
 
     @Column(name = "started_at")
     private OffsetDateTime startedAt;
 
     @Column(name = "completed_at")
     private OffsetDateTime completedAt;
+
+    @Column(name = "next_execution_at")
+    private OffsetDateTime nextExecutionAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "results", columnDefinition = "jsonb")
+    private Map<String, Object> results;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "execution_data", columnDefinition = "jsonb")
+    private Map<String, Object> executionData;
+
+    @Column(name = "error_message", columnDefinition = "TEXT")
+    private String errorMessage;
+
+    @Min(0)
+    @Column(name = "retry_count")
+    @Builder.Default
+    private Integer retryCount = 0;
+
+    @Min(0) @Max(10)
+    @Column(name = "max_retries")
+    @Builder.Default
+    private Integer maxRetries = 3;
 
     @CreationTimestamp
     @Column(name = "created_at")
@@ -69,6 +101,7 @@ public class AutomationExecution {
         RUNNING,
         COMPLETED,
         FAILED,
+        PAUSED,
         CANCELLED
     }
 }

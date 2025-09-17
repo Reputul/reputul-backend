@@ -33,7 +33,6 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class AutomationExecutorService {
 
-    private final ReviewRequestService reviewRequestService;
     private final EmailService emailService;
     private final SmsService smsService;
     private final EmailTemplateService emailTemplateService;
@@ -313,19 +312,26 @@ public class AutomationExecutorService {
             String deliveryMethod = (String) config.getOrDefault("delivery_method", "EMAIL");
 
             return switch (deliveryMethod.toUpperCase()) {
-                case "EMAIL" -> reviewRequestService.sendReviewRequestWithDefaultTemplate(
-                        customer.getBusiness().getUser(), customer.getId()) != null;
-                case "SMS" -> reviewRequestService.sendSmsReviewRequest(
-                        customer.getBusiness().getUser(), customer.getId()) != null;
+                case "EMAIL" -> {
+                    // Use EmailService directly instead of ReviewRequestService
+                    boolean result = emailService.sendReviewRequestWithTemplate(customer);
+                    yield result;
+                }
+                case "SMS" -> {
+                    // Use SmsService directly instead of ReviewRequestService
+                    SmsService.SmsResult result = smsService.sendReviewRequestSms(customer);
+                    yield result.isSuccess();
+                }
                 case "BOTH" -> {
+                    // Try email first, then SMS if email fails
                     try {
-                        yield reviewRequestService.sendReviewRequestWithDefaultTemplate(
-                                customer.getBusiness().getUser(), customer.getId()) != null;
+                        boolean emailResult = emailService.sendReviewRequestWithTemplate(customer);
+                        yield emailResult;
                     } catch (Exception emailError) {
                         log.warn("Email failed, trying SMS for customer {}: {}",
                                 customer.getId(), emailError.getMessage());
-                        yield reviewRequestService.sendSmsReviewRequest(
-                                customer.getBusiness().getUser(), customer.getId()) != null;
+                        SmsService.SmsResult smsResult = smsService.sendReviewRequestSms(customer);
+                        yield smsResult.isSuccess();
                     }
                 }
                 default -> {
