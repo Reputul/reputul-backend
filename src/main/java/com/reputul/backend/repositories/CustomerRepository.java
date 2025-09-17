@@ -18,6 +18,11 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
     // ----- User-scoped queries -----
     List<Customer> findByUserOrderByCreatedAtDesc(User user);
+    /**
+     * Find customer by ID and user
+     */
+    @Query("SELECT c FROM Customer c WHERE c.id = :id AND c.user = :user")
+    Optional<Customer> findByIdAndUser(@Param("id") Long id, @Param("user") User user);
     List<Customer> findByUserAndBusinessOrderByCreatedAtDesc(User user, Business business);
     Optional<Customer> findByEmailAndUser(String email, User user);
     List<Customer> findByUserAndStatusOrderByCreatedAtDesc(User user, Customer.CustomerStatus status);
