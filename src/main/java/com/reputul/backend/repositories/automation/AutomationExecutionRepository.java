@@ -4,6 +4,7 @@ import com.reputul.backend.models.automation.AutomationExecution;
 import com.reputul.backend.models.automation.AutomationWorkflow;
 import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.Organization;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -181,6 +182,57 @@ public interface AutomationExecutionRepository extends JpaRepository<AutomationE
      */
     List<AutomationExecution> findByStatusAndCreatedAtBefore(
             AutomationExecution.ExecutionStatus status, OffsetDateTime cutoffDate);
+
+    // Add these methods to AutomationExecutionRepository.java
+
+    /**
+     * Find recent test executions using native SQL for JSON search
+     */
+    @Query(value = """
+    SELECT e.* FROM automation_executions e 
+    JOIN automation_workflows w ON e.workflow_id = w.id 
+    WHERE w.organization_id = :orgId 
+    AND e.created_at >= :since 
+    AND (e.trigger_event LIKE '%TEST%' OR e.trigger_data::text LIKE '%test_execution%')
+    ORDER BY e.created_at DESC 
+    LIMIT :limit
+    """, nativeQuery = true)
+    List<AutomationExecution> findRecentTestExecutionsNative(
+            @Param("orgId") Long orgId,
+            @Param("since") OffsetDateTime since,
+            @Param("limit") int limit);
+
+    /**
+     * Find recent executions for health monitoring
+     */
+    @Query("""
+    SELECT e FROM AutomationExecution e 
+    WHERE e.workflow.organization.id = :orgId 
+    AND e.createdAt >= :since 
+    ORDER BY e.createdAt DESC
+    """)
+    List<AutomationExecution> findRecentExecutions(
+            @Param("orgId") Long orgId,
+            @Param("since") OffsetDateTime since);
+
+    /**
+     * Get execution metrics for organization
+     */
+    @Query("""
+    SELECT e.status, COUNT(e) 
+    FROM AutomationExecution e 
+    WHERE e.workflow.organization.id = :orgId 
+    AND e.createdAt >= :since 
+    GROUP BY e.status
+    """)
+    List<Object[]> getExecutionMetrics(
+            @Param("orgId") Long orgId,
+            @Param("since") OffsetDateTime since);
+
+    // Update the default method:
+    default List<AutomationExecution> findRecentTestExecutions(Long orgId, OffsetDateTime since, int limit) {
+        return findRecentTestExecutionsNative(orgId, since, limit);
+    }
 
     // =========================
     // LEGACY METHODS (Keep for backward compatibility but mark as deprecated)

@@ -6,6 +6,7 @@ import com.reputul.backend.dto.ResetPasswordRequestDto;
 import com.reputul.backend.models.User;
 import com.reputul.backend.payload.RegisterRequest;
 import com.reputul.backend.repositories.UserRepository;
+import com.reputul.backend.services.AutomationWorkflowTemplateService;
 import com.reputul.backend.services.PasswordResetService;
 import com.reputul.backend.services.EmailTemplateService;
 import jakarta.persistence.EntityManager;
@@ -41,6 +42,9 @@ public class AuthController {
 
     @Autowired
     private EmailTemplateService emailTemplateService;
+
+    @Autowired
+    private AutomationWorkflowTemplateService automationWorkflowTemplateService;
 
     @Autowired
     public AuthController(AuthenticationManager authenticationManager, JwtUtil jwtUtil,
@@ -89,6 +93,15 @@ public class AuthController {
         } catch (Exception e) {
             log.error("❌ Failed to create default templates for user {}: {}", savedUser.getEmail(), e.getMessage());
             // Don't fail registration if template creation fails
+        }
+
+        // NEW: Create default automation workflow templates for new user
+        try {
+            automationWorkflowTemplateService.createDefaultWorkflowTemplatesForUser(savedUser);
+            log.info("✅ Created default automation workflow templates for new user: {}", savedUser.getEmail());
+        } catch (Exception e) {
+            log.error("❌ Failed to create default automation templates for user {}: {}", savedUser.getEmail(), e.getMessage());
+            // Don't fail registration if automation template creation fails
         }
 
         return ResponseEntity.ok("User registered successfully!");
