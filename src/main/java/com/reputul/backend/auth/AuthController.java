@@ -3,9 +3,12 @@ package com.reputul.backend.auth;
 import com.reputul.backend.dto.ForgotPasswordRequestDto;
 import com.reputul.backend.dto.LoginRequestDto;
 import com.reputul.backend.dto.ResetPasswordRequestDto;
+import com.reputul.backend.models.Organization;
 import com.reputul.backend.models.User;
 import com.reputul.backend.payload.RegisterRequest;
+import com.reputul.backend.repositories.OrganizationRepository;
 import com.reputul.backend.repositories.UserRepository;
+import com.reputul.backend.services.AutomationWorkflowTemplateService;
 import com.reputul.backend.services.PasswordResetService;
 import com.reputul.backend.services.EmailTemplateService;
 import jakarta.persistence.EntityManager;
@@ -33,6 +36,7 @@ public class AuthController {
 
     private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
+    private final OrganizationRepository organizationRepository;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
 
@@ -43,11 +47,15 @@ public class AuthController {
     private EmailTemplateService emailTemplateService;
 
     @Autowired
+    private AutomationWorkflowTemplateService automationWorkflowTemplateService;
+
+    @Autowired
     public AuthController(AuthenticationManager authenticationManager, JwtUtil jwtUtil,
-                          UserRepository userRepository, PasswordEncoder passwordEncoder) {
+                          UserRepository userRepository, OrganizationRepository organizationRepository, PasswordEncoder passwordEncoder) {
         this.authenticationManager = authenticationManager;
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
+        this.organizationRepository = organizationRepository;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -74,10 +82,18 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Email is already registered.");
         }
 
+        // CREATE ORGANIZATION FIRST
+        Organization organization = Organization.builder()
+                .name(request.getName() + "'s Organization") // or use business name if provided
+                .build();
+        organization = organizationRepository.save(organization);
+
+        // CREATE USER WITH ORGANIZATION
         User newUser = User.builder()
                 .name(request.getName())
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
+                .organization(organization) // SET THE ORGANIZATION
                 .build();
 
         User savedUser = userRepository.save(newUser);
@@ -89,6 +105,15 @@ public class AuthController {
         } catch (Exception e) {
             log.error("❌ Failed to create default templates for user {}: {}", savedUser.getEmail(), e.getMessage());
             // Don't fail registration if template creation fails
+        }
+
+        // Create default automation workflow templates for new user
+        try {
+            automationWorkflowTemplateService.createDefaultWorkflowTemplatesForUser(savedUser);
+            log.info("✅ Created default automation workflow templates for new user: {}", savedUser.getEmail());
+        } catch (Exception e) {
+            log.error("❌ Failed to create default automation templates for user {}: {}", savedUser.getEmail(), e.getMessage());
+            // Don't fail registration if automation template creation fails
         }
 
         return ResponseEntity.ok("User registered successfully!");

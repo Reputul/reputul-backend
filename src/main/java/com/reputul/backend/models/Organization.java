@@ -3,11 +3,15 @@ package com.reputul.backend.models;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Organization (Workspace) entity for multi-tenancy
@@ -44,9 +48,9 @@ public class Organization {
     @Column(name = "stripe_subscription_id")
     private String stripeSubscriptionId;
 
-    // Organization settings (JSON)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "settings", columnDefinition = "jsonb")
-    private String settings;
+    private Map<String, Object> settings = new HashMap<>();
 
     // SMS settings
     @Column(name = "sms_phone_number")

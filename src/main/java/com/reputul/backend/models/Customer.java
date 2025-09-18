@@ -97,6 +97,17 @@ public class Customer {
     @Column(name = "sms_send_date_reset")
     private LocalDate smsSendDateReset;
 
+    @Column(name = "service_completed_date")
+    private OffsetDateTime serviceCompletedDate;
+
+    @Column(name = "automation_triggered")
+    @Builder.Default
+    private Boolean automationTriggered = false;
+
+    @Column(name = "ready_for_automation")
+    @Builder.Default
+    private Boolean readyForAutomation = false;
+
     // Relationships
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "business_id", nullable = false)
@@ -130,6 +141,12 @@ public class Customer {
         }
         if (smsSendCountToday == null) {
             smsSendCountToday = 0;
+        }
+        if (automationTriggered == null) {
+            automationTriggered = false;
+        }
+        if (readyForAutomation == null) {
+            readyForAutomation = false;
         }
     }
 
@@ -186,6 +203,37 @@ public class Customer {
         }
 
         return smsSendCountToday != null && smsSendCountToday >= dailyLimit;
+    }
+
+    public void markServiceCompleted() {
+        this.status = CustomerStatus.COMPLETED;
+        this.serviceCompletedDate = OffsetDateTime.now();
+        this.readyForAutomation = true;
+    }
+
+    public boolean isReadyForAutomation() {
+        // Ready if:
+        // 1. Status is COMPLETED, OR
+        // 2. Service date is in the past (assuming work is done), OR
+        // 3. Explicitly marked as ready
+
+        if (readyForAutomation != null && readyForAutomation) {
+            return true;
+        }
+
+        if (status == CustomerStatus.COMPLETED) {
+            return true;
+        }
+
+        if (serviceDate != null && serviceDate.isBefore(LocalDate.now())) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public void markAutomationTriggered() {
+        this.automationTriggered = true;
     }
 
     // Enums

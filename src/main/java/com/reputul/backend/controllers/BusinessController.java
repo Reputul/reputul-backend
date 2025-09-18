@@ -36,8 +36,17 @@ public class BusinessController {
     }
 
     @GetMapping
-    public List<Business> getAll() {
-        return businessRepo.findAll();
+    public ResponseEntity<List<Business>> getAll(@AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            List<Business> businesses = businessRepo.findByUserId(user.getId());
+            return ResponseEntity.ok(businesses);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 
     @PostMapping
@@ -49,6 +58,7 @@ public class BusinessController {
                     .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
 
             business.setUser(owner);
+            business.setOrganization(owner.getOrganization());
             business.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
             Business savedBusiness = businessRepo.save(business);
 

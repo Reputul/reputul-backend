@@ -7,6 +7,7 @@ import com.reputul.backend.models.*;
 import com.reputul.backend.repositories.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +31,9 @@ public class ReviewRequestService {
     private final EmailTemplateService emailTemplateService;
     private final SmsService smsService;
     private final SmsTemplateService smsTemplateService;
+
+    @Autowired
+    private AutomationTriggerService automationTriggerService;
 
     @Transactional
     public ReviewRequestDto sendReviewRequest(User user, SendReviewRequestDto request) {
@@ -155,6 +159,11 @@ public class ReviewRequestService {
             reviewRequest.setSmsStatus(smsResult.getStatus());
             log.info("✅ Compliance SMS review request sent successfully to {} - SID: {}",
                     customer.getPhone(), smsResult.getMessageSid());
+            try {
+                automationTriggerService.onReviewRequestCompleted(reviewRequest);
+            } catch (Exception e) {
+                log.error("Failed to trigger automation for SMS review request {}: {}", reviewRequest.getId(), e.getMessage());
+            }
         } else {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
             reviewRequest.setErrorMessage("Failed to send SMS: " + smsResult.getErrorMessage());
@@ -223,6 +232,11 @@ public class ReviewRequestService {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
             reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
             log.info("✅ Default template email review request sent successfully to {}", customer.getEmail());
+            try {
+                automationTriggerService.onReviewRequestCompleted(reviewRequest);
+            } catch (Exception e) {
+                log.error("Failed to trigger automation for review request {}: {}", reviewRequest.getId(), e.getMessage());
+            }
         } else {
             reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
             reviewRequest.setErrorMessage("Failed to send email with default template");
@@ -415,7 +429,15 @@ public class ReviewRequestService {
         switch (status) {
             case OPENED -> request.setOpenedAt(OffsetDateTime.now(ZoneOffset.UTC));
             case CLICKED -> request.setClickedAt(OffsetDateTime.now(ZoneOffset.UTC));
-            case COMPLETED -> request.setReviewedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            case COMPLETED -> {
+                request.setReviewedAt(OffsetDateTime.now(ZoneOffset.UTC));
+                // NEW: Trigger automation when review is completed
+                try {
+                    automationTriggerService.onReviewRequestCompleted(request);
+                } catch (Exception e) {
+                    log.error("Failed to trigger automation for completed review {}: {}", request.getId(), e.getMessage());
+                }
+            }
         }
 
         request = reviewRequestRepository.save(request);
