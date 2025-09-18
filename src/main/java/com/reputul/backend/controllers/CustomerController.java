@@ -66,8 +66,22 @@ public class CustomerController {
             Authentication authentication) {
         try {
             User user = getCurrentUser(authentication);
-            CustomerDto customer = customerService.createCustomer(user, request);
-            return ResponseEntity.ok(customer);
+            CustomerDto customerDto = customerService.createCustomer(user, request);
+
+            // Trigger automation on customer creation
+            try {
+                // Get the actual Customer entity for automation
+                Customer customer = customerRepository.findById(customerDto.getId())
+                        .orElseThrow(() -> new RuntimeException("Customer not found after creation"));
+
+                automationTriggerService.onCustomerCreated(customer);
+                System.out.println("✅ Triggered automation workflows for customer: " + customer.getName());
+            } catch (Exception e) {
+                System.err.println("❌ Failed to trigger automation for customer: " + e.getMessage());
+                // Don't fail customer creation if automation fails
+            }
+
+            return ResponseEntity.ok(customerDto);
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().build();
         }

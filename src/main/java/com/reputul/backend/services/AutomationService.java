@@ -1,5 +1,6 @@
 package com.reputul.backend.services;
 
+import com.reputul.backend.dto.automation.AutomationWorkflowDto;
 import com.reputul.backend.models.User;
 import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.Business;
@@ -38,18 +39,55 @@ public class AutomationService {
     /**
      * Get workflows for user's organization with proper tenant scoping
      */
-    public List<AutomationWorkflow> getWorkflows(User user, Long businessId) {
+    @Transactional(readOnly = true)
+    public List<AutomationWorkflowDto> getWorkflows(User user, Long businessId) {
         log.debug("Getting workflows for organization: {}, business: {}", user.getOrganization().getId(), businessId);
 
+        List<AutomationWorkflow> workflows;
         if (businessId != null) {
             // Validate business belongs to user's organization
-            Business business = businessRepository.findByIdAndUserId(businessId, user.getId())
+            Business business = businessRepository.findByIdAndUser(businessId, user)
                     .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
-            return workflowRepository.findByOrganizationAndBusinessOrderByCreatedAtDesc(
+            workflows = workflowRepository.findByOrganizationAndBusinessOrderByCreatedAtDesc(
                     user.getOrganization(), business);
+        } else {
+            workflows = workflowRepository.findByOrganizationAndIsActiveTrueOrderByCreatedAtDesc(user.getOrganization());
         }
 
-        return workflowRepository.findByOrganizationAndIsActiveTrueOrderByCreatedAtDesc(user.getOrganization());
+        // Convert to DTOs while session is active
+        return workflows.stream()
+                .map(this::convertToDto)
+                .toList();
+    }
+
+    /**
+     * Get single workflow as DTO
+     */
+    @Transactional(readOnly = true)
+    public AutomationWorkflowDto getWorkflowDto(User user, Long workflowId) {
+        AutomationWorkflow workflow = workflowRepository.findByIdAndOrganizationId(workflowId, user.getOrganization().getId())
+                .orElseThrow(() -> new RuntimeException("Workflow not found or access denied"));
+
+        return convertToDto(workflow);
+    }
+
+    /**
+     * Convert AutomationWorkflow entity to DTO
+     */
+    private AutomationWorkflowDto convertToDto(AutomationWorkflow workflow) {
+        return AutomationWorkflowDto.builder()
+                .id(workflow.getId())
+                .name(workflow.getName())
+                .description(workflow.getDescription())
+                .triggerType(workflow.getTriggerType() != null ? workflow.getTriggerType().toString() : null)
+                .deliveryMethod(workflow.getDeliveryMethod() != null ? workflow.getDeliveryMethod().toString() : null)
+                .isActive(workflow.getIsActive())
+                .executionCount(workflow.getExecutionCount())
+                .actions(workflow.getActions())
+                .triggerConfig(workflow.getTriggerConfig())
+                .createdAt(workflow.getCreatedAt())
+                .createdByName(workflow.getCreatedBy() != null ? workflow.getCreatedBy().getName() : null)
+                .build();
     }
 
     /**
@@ -62,8 +100,8 @@ public class AutomationService {
         // Validate business if specified
         Business business = null;
         if (request.getBusinessId() != null) {
-            business = businessRepository.findByIdAndUserId(
-                            request.getBusinessId(), user.getId())
+            business = businessRepository.findByIdAndUser(
+                            request.getBusinessId(), user)
                     .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
         }
 
@@ -152,6 +190,7 @@ public class AutomationService {
     /**
      * Get workflow metrics with proper calculations
      */
+    @Transactional(readOnly = true)
     public WorkflowMetrics getWorkflowMetrics(User user, Long workflowId, int days) {
         log.debug("Getting metrics for workflow {} for {} days", workflowId, days);
 
@@ -261,6 +300,7 @@ public class AutomationService {
     // WORKFLOW TEMPLATES
     // =========================
 
+    @Transactional(readOnly = true)
     public List<WorkflowTemplate> getWorkflowTemplates(String category) {
         if (category != null) {
             return templateRepository.findByCategoryAndIsActiveTrueOrderByCreatedAtDesc(category);

@@ -234,6 +234,17 @@ public interface AutomationExecutionRepository extends JpaRepository<AutomationE
         return findRecentTestExecutionsNative(orgId, since, limit);
     }
 
+    /**
+     * Find executions by workflow and customer
+     */
+    List<AutomationExecution> findByWorkflowAndCustomer(AutomationWorkflow workflow, Customer customer);
+
+    /**
+     * Find executions by workflow ID and customer ID
+     */
+    @Query("SELECT e FROM AutomationExecution e WHERE e.workflow.id = :workflowId AND e.customer.id = :customerId")
+    List<AutomationExecution> findByWorkflowIdAndCustomerId(@Param("workflowId") Long workflowId, @Param("customerId") Long customerId);
+
     // =========================
     // LEGACY METHODS (Keep for backward compatibility but mark as deprecated)
     // =========================

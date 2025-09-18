@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -16,11 +17,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * AutomationMonitoringController
- *
- * Simple monitoring and visibility for automation executions
- */
 @RestController
 @RequestMapping("/api/automation/monitoring")
 @RequiredArgsConstructor
@@ -30,12 +26,9 @@ public class AutomationMonitoringController {
     private final AutomationExecutionRepository executionRepository;
     private final AutomationWorkflowRepository workflowRepository;
 
-    /**
-     * Get recent executions with filtering
-     * GET /api/automation/monitoring/executions
-     */
     @GetMapping("/executions")
     @PreAuthorize("hasRole('USER')")
+    @Transactional(readOnly = true)  // Keep session open for lazy loading
     public ResponseEntity<Map<String, Object>> getRecentExecutions(
             @CurrentUser User user,
             @RequestParam(defaultValue = "24") int hoursBack,
@@ -62,8 +55,9 @@ public class AutomationMonitoringController {
                 executions = executions.subList(0, limit);
             }
 
+            // Convert to DTOs to avoid lazy loading issues
             result.put("executions", executions.stream()
-                    .map(this::convertToSummary)
+                    .map(this::convertToExecutionSummary)
                     .toList());
             result.put("totalFound", executions.size());
             result.put("hoursBack", hoursBack);
@@ -77,12 +71,9 @@ public class AutomationMonitoringController {
         return ResponseEntity.ok(result);
     }
 
-    /**
-     * Get execution metrics dashboard
-     * GET /api/automation/monitoring/metrics
-     */
     @GetMapping("/metrics")
     @PreAuthorize("hasRole('USER')")
+    @Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getExecutionMetrics(
             @CurrentUser User user,
             @RequestParam(defaultValue = "24") int hoursBack) {
@@ -92,11 +83,9 @@ public class AutomationMonitoringController {
         try {
             OffsetDateTime since = OffsetDateTime.now().minusHours(hoursBack);
 
-            // Get raw metrics
             List<Object[]> rawMetrics = executionRepository.getExecutionMetrics(
                     user.getOrganization().getId(), since);
 
-            // Process metrics
             Map<String, Long> statusCounts = new HashMap<>();
             long totalExecutions = 0;
 
@@ -113,7 +102,6 @@ public class AutomationMonitoringController {
             metrics.put("hoursBack", hoursBack);
             metrics.put("since", since);
 
-            // Workflow counts
             long totalWorkflows = workflowRepository.countByOrganizationAndIsActiveTrue(user.getOrganization());
             metrics.put("totalActiveWorkflows", totalWorkflows);
 
@@ -125,12 +113,9 @@ public class AutomationMonitoringController {
         return ResponseEntity.ok(metrics);
     }
 
-    /**
-     * Pause/resume workflow
-     * PUT /api/automation/monitoring/workflows/{workflowId}/toggle
-     */
     @PutMapping("/workflows/{workflowId}/toggle")
     @PreAuthorize("hasRole('USER')")
+    @Transactional
     public ResponseEntity<Map<String, Object>> toggleWorkflow(
             @CurrentUser User user,
             @PathVariable Long workflowId) {
@@ -162,9 +147,8 @@ public class AutomationMonitoringController {
         return ResponseEntity.ok(result);
     }
 
-    // Helper methods
-
-    private Map<String, Object> convertToSummary(AutomationExecution execution) {
+    // Convert execution to safe DTO
+    private Map<String, Object> convertToExecutionSummary(AutomationExecution execution) {
         Map<String, Object> summary = new HashMap<>();
         summary.put("id", execution.getId());
         summary.put("workflowName", execution.getWorkflow().getName());

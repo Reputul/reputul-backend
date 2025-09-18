@@ -1,5 +1,6 @@
 package com.reputul.backend.controllers;
 
+import com.reputul.backend.dto.automation.AutomationWorkflowDto;
 import com.reputul.backend.models.User;
 import com.reputul.backend.models.automation.AutomationWorkflow;
 import com.reputul.backend.models.automation.AutomationExecution;
@@ -12,8 +13,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,12 +44,26 @@ public class AutomationController {
      */
     @GetMapping("/workflows")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<List<AutomationWorkflow>> getWorkflows(
+    public ResponseEntity<List<AutomationWorkflowDto>> getWorkflows(
             @CurrentUser User user,
             @RequestParam(required = false) Long businessId) {
 
-        List<AutomationWorkflow> workflows = automationService.getWorkflows(user, businessId);
+        List<AutomationWorkflowDto> workflows = automationService.getWorkflows(user, businessId);
         return ResponseEntity.ok(workflows);
+    }
+
+    /**
+     * Get single workflow
+     * GET /api/automation/workflows/{workflowId}
+     */
+    @GetMapping("/workflows/{workflowId}")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<AutomationWorkflowDto> getWorkflow(
+            @CurrentUser User user,
+            @PathVariable Long workflowId) {
+
+        AutomationWorkflowDto workflow = automationService.getWorkflowDto(user, workflowId);
+        return ResponseEntity.ok(workflow);
     }
 
     /**
@@ -123,42 +141,82 @@ public class AutomationController {
      */
     @PostMapping("/workflows/{workflowId}/trigger")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<AutomationExecution> triggerWorkflow(
+    @Transactional
+    public ResponseEntity<Map<String, Object>> triggerWorkflow(
             @CurrentUser User user,
             @PathVariable Long workflowId,
             @RequestBody TriggerWorkflowRequest request) {
 
         log.info("Manually triggering workflow {} for customer {}", workflowId, request.getCustomerId());
 
-        AutomationExecution execution = automationService.triggerWorkflow(
-                user,
-                workflowId,
-                request.getCustomerId(),
-                "MANUAL_TRIGGER",
-                Map.of("triggered_by", "user_interface", "reason", request.getReason())
-        );
+        try {
+            AutomationExecution execution = automationService.triggerWorkflow(
+                    user,
+                    workflowId,
+                    request.getCustomerId(),
+                    "MANUAL_TRIGGER",
+                    Map.of("triggered_by", "user_interface", "reason", request.getReason())
+            );
 
-        return ResponseEntity.ok(execution);
+            // Return DTO instead of entity
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("executionId", execution.getId());
+            response.put("workflowName", execution.getWorkflow().getName());
+            response.put("customerName", execution.getCustomer().getName());
+            response.put("status", execution.getStatus().toString());
+            response.put("scheduledFor", execution.getScheduledFor());
+            response.put("message", "Workflow triggered successfully");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error triggering workflow: {}", e.getMessage());
+            return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "error", e.getMessage()
+            ));
+        }
     }
 
-    /**
-     * Bulk trigger workflow for multiple customers
-     * POST /api/automation/workflows/{workflowId}/bulk-trigger
-     */
     @PostMapping("/workflows/{workflowId}/bulk-trigger")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<List<AutomationExecution>> bulkTriggerWorkflow(
+    @Transactional
+    public ResponseEntity<Map<String, Object>> bulkTriggerWorkflow(
             @CurrentUser User user,
             @PathVariable Long workflowId,
             @RequestBody BulkTriggerRequest request) {
 
         log.info("Bulk triggering workflow {} for {} customers", workflowId, request.getCustomerIds().size());
 
-        List<AutomationExecution> executions = automationService.bulkTriggerWorkflow(
-                user, workflowId, request.getCustomerIds(), "BULK_MANUAL_TRIGGER");
+        try {
+            List<AutomationExecution> executions = automationService.bulkTriggerWorkflow(
+                    user, workflowId, request.getCustomerIds(), "BULK_MANUAL_TRIGGER");
 
-        return ResponseEntity.ok(executions);
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("totalTriggered", executions.size());
+            response.put("workflowId", workflowId);
+            response.put("executions", executions.stream()
+                    .map(e -> Map.of(
+                            "executionId", e.getId(),
+                            "customerId", e.getCustomer().getId(),
+                            "customerName", e.getCustomer().getName(),
+                            "status", e.getStatus().toString()
+                    ))
+                    .toList());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error bulk triggering workflow: {}", e.getMessage());
+            return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "error", e.getMessage()
+            ));
+        }
     }
+
 
     // =========================
     // WORKFLOW TEMPLATES
