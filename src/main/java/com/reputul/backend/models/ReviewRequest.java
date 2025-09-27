@@ -1,5 +1,6 @@
 package com.reputul.backend.models;
 
+import com.reputul.backend.enums.SourceTrigger;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -107,6 +108,13 @@ public class ReviewRequest {
     @Column(name = "email_error_code")
     private String emailErrorCode;
 
+    @Column(name = "campaign_execution_id")
+    private Long campaignExecutionId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_trigger")
+    private SourceTrigger sourceTrigger = SourceTrigger.MANUAL;
+
     @PrePersist
     protected void onCreate() {
         createdAt = OffsetDateTime.now(ZoneOffset.UTC);
@@ -171,5 +179,21 @@ public class ReviewRequest {
     // NEW: Helper method to get the appropriate status for tracking
     public String getDeliveryStatus() {
         return isSmsDelivery() ? smsStatus : emailStatus;
+    }
+
+    public Long getCampaignExecutionId() {
+        return campaignExecutionId;
+    }
+
+    public void setCampaignExecutionId(Long campaignExecutionId) {
+        this.campaignExecutionId = campaignExecutionId;
+    }
+
+    public SourceTrigger getSourceTrigger() {
+        return sourceTrigger;
+    }
+
+    public void setSourceTrigger(SourceTrigger sourceTrigger) {
+        this.sourceTrigger = sourceTrigger;
     }
 }
