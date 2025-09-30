@@ -14,7 +14,7 @@ public interface CampaignSequenceRepository extends JpaRepository<CampaignSequen
 
     List<CampaignSequence> findByOrgIdAndIsActiveTrue(Long orgId);
 
-    Optional<CampaignSequence> findByOrgIdAndIsDefaultTrue(Long orgId);
+    List<CampaignSequence> findByOrgIdAndIsDefaultTrue(Long orgId);
 
     List<CampaignSequence> findByOrgIdOrderByCreatedAtDesc(Long orgId);
 

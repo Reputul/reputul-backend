@@ -14,6 +14,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -71,15 +74,19 @@ public class CampaignSequenceService {
      * Get default sequence for organization, creating one if it doesn't exist
      */
     public CampaignSequence getDefaultSequence(Long orgId) {
-        Optional<CampaignSequence> defaultSequence = sequenceRepository.findByOrgIdAndIsDefaultTrue(orgId);
+        List<CampaignSequence> defaultSequences = sequenceRepository.findByOrgIdAndIsDefaultTrue(orgId);
 
-        if (defaultSequence.isPresent()) {
-            return defaultSequence.get();
+        if (!defaultSequences.isEmpty()) {
+            if (defaultSequences.size() > 1) {
+                log.warn("Found {} default sequences for org {}. Returning first one.",
+                        defaultSequences.size(), orgId);
+            }
+            return defaultSequences.getFirst();
         }
 
-        // Create default NiceJob-style sequence
-        log.info("No default sequence found for org {}, creating one", orgId);
-        return createDefaultSequence(orgId);
+        // No default found - either throw exception or create/return a fallback
+        throw new EntityNotFoundException(
+                "No default campaign sequence found for organization: " + orgId);
     }
 
     /**
@@ -189,6 +196,51 @@ public class CampaignSequenceService {
         stepRepository.delete(step);
     }
 
+    /**
+     * Update sequence active/inactive status
+     */
+    public CampaignSequence updateSequenceStatus(Long sequenceId, Boolean isActive) {
+        CampaignSequence sequence = sequenceRepository.findById(sequenceId)
+                .orElseThrow(() -> new EntityNotFoundException("Sequence not found"));
+
+        sequence.setIsActive(isActive);
+        sequence.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
+
+        return sequenceRepository.save(sequence);
+    }
+
+    /**
+     * Set a sequence as default for an organization
+     * Unsets any other default sequences for the same org
+     */
+    @Transactional
+    public CampaignSequence setAsDefault(Long sequenceId, Long orgId) {
+        // First, unset all default sequences for this org
+        List<CampaignSequence> existingDefaults = sequenceRepository
+                .findByOrgIdAndIsDefaultTrue(orgId);
+
+        for (CampaignSequence existing : existingDefaults) {
+            existing.setIsDefault(false);
+            existing.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
+            sequenceRepository.save(existing);
+        }
+
+        // Now set the new default
+        CampaignSequence sequence = sequenceRepository.findById(sequenceId)
+                .orElseThrow(() -> new EntityNotFoundException("Sequence not found"));
+
+        // Verify ownership
+        if (!sequence.getOrgId().equals(orgId)) {
+            throw new IllegalStateException("Sequence does not belong to this organization");
+        }
+
+        sequence.setIsDefault(true);
+        sequence.setIsActive(true); // Auto-activate when set as default
+        sequence.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
+
+        return sequenceRepository.save(sequence);
+    }
+
     // Private helper methods
 
     private void validateSequenceRequest(CreateSequenceRequest request) {
@@ -228,11 +280,13 @@ public class CampaignSequenceService {
     }
 
     private void unsetOtherDefaults(Long orgId) {
-        sequenceRepository.findByOrgIdAndIsDefaultTrue(orgId)
-                .ifPresent(defaultSequence -> {
-                    defaultSequence.setIsDefault(false);
-                    sequenceRepository.save(defaultSequence);
-                });
+        List<CampaignSequence> defaultSequences = sequenceRepository.findByOrgIdAndIsDefaultTrue(orgId);
+
+        for (CampaignSequence defaultSequence : defaultSequences) {
+            defaultSequence.setIsDefault(false);
+            defaultSequence.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
+            sequenceRepository.save(defaultSequence);
+        }
     }
 
     private CampaignStep createStep(CampaignSequence sequence, CreateStepRequest stepRequest) {

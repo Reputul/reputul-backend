@@ -1,4 +1,4 @@
-package com.reputul.backend.controllers;
+package com.reputul.backend.controllers.campaign;
 
 import com.reputul.backend.dto.campaign.CampaignSequenceDto;
 import com.reputul.backend.dto.campaign.CampaignExecutionDto;
@@ -6,7 +6,6 @@ import com.reputul.backend.dto.campaign.CampaignStepDto;
 import com.reputul.backend.dto.campaign.request.CreateSequenceRequest;
 import com.reputul.backend.dto.campaign.request.UpdateSequenceRequest;
 import com.reputul.backend.dto.campaign.request.StartCampaignRequest;
-import com.reputul.backend.enums.MessageType;
 import com.reputul.backend.models.User;
 import com.reputul.backend.models.ReviewRequest;
 import com.reputul.backend.models.campaign.CampaignSequence;
@@ -25,6 +24,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -143,6 +143,78 @@ public class CampaignController {
         User user = getCurrentUser(authentication);
         CampaignSequence defaultSequence = sequenceService.getDefaultSequence(user.getOrganization().getId());
         return ResponseEntity.ok(convertSequenceToDto(defaultSequence));
+    }
+
+    // NEW: Toggle sequence active/inactive status
+    @PutMapping("/sequences/{sequenceId}/status")
+    public ResponseEntity<CampaignSequenceDto> updateSequenceStatus(
+            @PathVariable Long sequenceId,
+            @RequestBody Map<String, Boolean> request,
+            Authentication authentication) {
+        User user = getCurrentUser(authentication);
+
+        try {
+            // Verify ownership
+            CampaignSequence sequence = sequenceService.getSequenceWithSteps(sequenceId);
+            if (!sequence.getOrgId().equals(user.getOrganization().getId())) {
+                return ResponseEntity.notFound().build();
+            }
+
+            Boolean isActive = request.get("isActive");
+            if (isActive == null) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            // Update the status
+            CampaignSequence updated = sequenceService.updateSequenceStatus(sequenceId, isActive);
+
+            log.info("Sequence {} {} by user {}",
+                    sequenceId,
+                    isActive ? "activated" : "deactivated",
+                    user.getEmail());
+
+            return ResponseEntity.ok(convertSequenceToDto(updated));
+        } catch (EntityNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            log.warn("Cannot update status for sequence {} for user {}: {}",
+                    sequenceId, user.getEmail(), e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    // NEW: Set a sequence as the default
+    @PutMapping("/sequences/{sequenceId}/set-default")
+    public ResponseEntity<CampaignSequenceDto> setAsDefault(
+            @PathVariable Long sequenceId,
+            Authentication authentication) {
+        User user = getCurrentUser(authentication);
+
+        try {
+            // Verify ownership
+            CampaignSequence sequence = sequenceService.getSequenceWithSteps(sequenceId);
+            if (!sequence.getOrgId().equals(user.getOrganization().getId())) {
+                return ResponseEntity.notFound().build();
+            }
+
+            // Set as default (this will unset any other default sequences for the org)
+            CampaignSequence updated = sequenceService.setAsDefault(
+                    sequenceId,
+                    user.getOrganization().getId());
+
+            log.info("Sequence {} set as default for organization {} by user {}",
+                    sequenceId,
+                    user.getOrganization().getId(),
+                    user.getEmail());
+
+            return ResponseEntity.ok(convertSequenceToDto(updated));
+        } catch (EntityNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            log.warn("Cannot set sequence {} as default for user {}: {}",
+                    sequenceId, user.getEmail(), e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
     }
 
     // ================================
