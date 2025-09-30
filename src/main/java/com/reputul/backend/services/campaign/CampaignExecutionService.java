@@ -220,6 +220,13 @@ public class CampaignExecutionService {
     }
 
     /**
+     * Get active executions
+     */
+    public List<CampaignExecution> getActiveExecutions() {
+        return executionRepository.findByStatus(ExecutionStatus.ACTIVE);
+    }
+
+    /**
      * Auto-start campaign for new review request
      * Called from ReviewRequestService when creating new requests
      */

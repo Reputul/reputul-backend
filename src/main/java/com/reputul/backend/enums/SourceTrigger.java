@@ -4,7 +4,8 @@ public enum SourceTrigger {
     MANUAL("Manual"),
     CRM_INTEGRATION("CRM Integration"),
     API("API"),
-    BULK_IMPORT("Bulk Import");
+    BULK_IMPORT("Bulk Import"),
+    CAMPAIGN("Campaign");
 
     private final String displayName;
 
@@ -14,9 +15,5 @@ public enum SourceTrigger {
 
     public String getDisplayName() {
         return displayName;
-    }
-
-    public boolean isAutomated() {
-        return this == CRM_INTEGRATION || this == API;
     }
 }

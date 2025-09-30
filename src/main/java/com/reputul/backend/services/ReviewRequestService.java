@@ -4,7 +4,10 @@ import com.reputul.backend.dto.EmailTemplateDto;
 import com.reputul.backend.dto.ReviewRequestDto;
 import com.reputul.backend.dto.SendReviewRequestDto;
 import com.reputul.backend.models.*;
+import com.reputul.backend.models.campaign.CampaignSequence;
 import com.reputul.backend.repositories.*;
+import com.reputul.backend.services.campaign.CampaignExecutionService;
+import com.reputul.backend.services.campaign.CampaignSequenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +34,8 @@ public class ReviewRequestService {
     private final EmailTemplateService emailTemplateService;
     private final SmsService smsService;
     private final SmsTemplateService smsTemplateService;
+    private final CampaignExecutionService campaignExecutionService;
+    private final CampaignSequenceService sequenceService;
 
     @Autowired
     private AutomationTriggerService automationTriggerService;
@@ -74,6 +79,9 @@ public class ReviewRequestService {
                 .build();
 
         reviewRequest = reviewRequestRepository.save(reviewRequest);
+
+        // CAMPAIGN INTEGRATION: Auto-start campaign for new review request
+        autoStartCampaignIfEnabled(reviewRequest, user);
 
         // UPDATED: Use the new template-based email sending
         boolean emailSent = sendEmailWithTemplate(customer, template, reviewRequest);
@@ -147,6 +155,9 @@ public class ReviewRequestService {
                 .build();
 
         reviewRequest = reviewRequestRepository.save(reviewRequest);
+
+        // CAMPAIGN INTEGRATION: Auto-start campaign for SMS review request
+        autoStartCampaignIfEnabled(reviewRequest, user);
 
         // Send SMS using compliance-aware service
         SmsService.SmsResult smsResult = smsService.sendReviewRequestSms(customer);
@@ -224,6 +235,9 @@ public class ReviewRequestService {
 
         reviewRequest = reviewRequestRepository.save(reviewRequest);
 
+        // CAMPAIGN INTEGRATION: Auto-start campaign for default template request
+        autoStartCampaignIfEnabled(reviewRequest, user);
+
         // Send email using new template-based method
         boolean emailSent = emailService.sendReviewRequestWithTemplate(customer);
 
@@ -248,7 +262,121 @@ public class ReviewRequestService {
     }
 
     /**
-     * NEW: Send follow-up emails
+     * NEW: Create review request and auto-start campaign (no immediate send)
+     * This method creates the review request and starts the campaign, letting the campaign handle sending
+     */
+    @Transactional
+    public ReviewRequestDto createReviewRequestWithCampaign(User user, Long customerId, Long sequenceId) {
+        log.info("Creating review request with campaign for customer {} using sequence {}", customerId, sequenceId);
+
+        // Validate customer belongs to user's business
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+
+        if (!customer.getBusiness().getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Access denied: Customer does not belong to your business");
+        }
+
+        Business business = customer.getBusiness();
+
+        // Get default template for the review request record
+        EmailTemplate template;
+        try {
+            template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(user, EmailTemplate.TemplateType.INITIAL_REQUEST)
+                    .orElseThrow(() -> new RuntimeException("No default template found"));
+        } catch (Exception e) {
+            log.warn("No default template found, creating default templates for user {}", user.getId());
+            emailTemplateService.createDefaultTemplatesForUser(user);
+            template = emailTemplateRepository.findByUserAndTypeAndIsDefaultTrue(user, EmailTemplate.TemplateType.INITIAL_REQUEST)
+                    .orElseThrow(() -> new RuntimeException("Failed to create default template"));
+        }
+
+        String reviewLink = emailService.generateReviewLink(business);
+
+        // Create review request record (will be populated by campaign)
+        ReviewRequest reviewRequest = ReviewRequest.builder()
+                .customer(customer)
+                .business(business)
+                .emailTemplate(template)
+                .deliveryMethod(ReviewRequest.DeliveryMethod.EMAIL) // Campaign will determine actual delivery
+                .recipientEmail(customer.getEmail())
+                .subject("Campaign Managed Request")
+                .emailBody("Content will be managed by campaign system")
+                .reviewLink(reviewLink)
+                .status(ReviewRequest.RequestStatus.PENDING)
+                .build();
+
+        reviewRequest = reviewRequestRepository.save(reviewRequest);
+
+        // CAMPAIGN INTEGRATION: Start specific campaign sequence
+        try {
+            if (sequenceId != null) {
+                // Get the specific sequence and start campaign
+                CampaignSequence sequence = sequenceService.getSequenceWithSteps(sequenceId);
+                if (!sequence.getOrgId().equals(user.getOrganization().getId())) {
+                    throw new RuntimeException("Sequence not found or access denied");
+                }
+                campaignExecutionService.startCampaign(reviewRequest, sequence);
+            } else {
+                // Start default campaign
+                campaignExecutionService.startDefaultCampaign(reviewRequest, user.getOrganization().getId());
+            }
+
+            log.info("Campaign started successfully for review request {}", reviewRequest.getId());
+        } catch (Exception e) {
+            log.error("Failed to start campaign for review request {}: {}", reviewRequest.getId(), e.getMessage());
+            reviewRequest.setStatus(ReviewRequest.RequestStatus.FAILED);
+            reviewRequest.setErrorMessage("Failed to start campaign: " + e.getMessage());
+            reviewRequest = reviewRequestRepository.save(reviewRequest);
+        }
+
+        return convertToDto(reviewRequest);
+    }
+
+    /**
+     * NEW: Manual campaign start for existing review requests
+     */
+    @Transactional
+    public ReviewRequestDto startCampaignForExistingRequest(User user, Long reviewRequestId, Long sequenceId) {
+        log.info("Starting campaign for existing review request {} using sequence {}", reviewRequestId, sequenceId);
+
+        ReviewRequest reviewRequest = reviewRequestRepository.findById(reviewRequestId)
+                .orElseThrow(() -> new RuntimeException("Review request not found"));
+
+        // Verify ownership
+        if (!reviewRequest.getBusiness().getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Access denied: Review request does not belong to your business");
+        }
+
+        // Check if campaign is already running
+        if (reviewRequest.getCampaignExecutionId() != null) {
+            throw new RuntimeException("Campaign already running for this review request");
+        }
+
+        try {
+            if (sequenceId != null) {
+                // Get the specific sequence and start campaign
+                CampaignSequence sequence = sequenceService.getSequenceWithSteps(sequenceId);
+                if (!sequence.getOrgId().equals(user.getOrganization().getId())) {
+                    throw new RuntimeException("Sequence not found or access denied");
+                }
+                campaignExecutionService.startCampaign(reviewRequest, sequence);
+            } else {
+                // Start default campaign
+                campaignExecutionService.startDefaultCampaign(reviewRequest, user.getOrganization().getId());
+            }
+
+            log.info("Campaign started successfully for existing review request {}", reviewRequest.getId());
+        } catch (Exception e) {
+            log.error("Failed to start campaign for review request {}: {}", reviewRequest.getId(), e.getMessage());
+            throw new RuntimeException("Failed to start campaign: " + e.getMessage());
+        }
+
+        return convertToDto(reviewRequestRepository.findById(reviewRequestId).orElseThrow());
+    }
+
+    /**
+     * NEW: Follow-up emails
      */
     @Transactional
     public ReviewRequestDto sendFollowUpEmail(User user, Long customerId, EmailTemplate.TemplateType followUpType) {
@@ -367,6 +495,36 @@ public class ReviewRequestService {
     }
 
     /**
+     * CAMPAIGN INTEGRATION: Helper method to auto-start campaigns when enabled
+     */
+    private void autoStartCampaignIfEnabled(ReviewRequest reviewRequest, User user) {
+        try {
+            // Check if campaigns are enabled for this organization (you can add org-level settings later)
+            boolean campaignsEnabled = shouldAutoStartCampaign(reviewRequest.getBusiness(), user);
+
+            if (campaignsEnabled) {
+                campaignExecutionService.autoStartCampaignForReviewRequest(reviewRequest);
+                log.info("✅ Auto-started campaign for review request {}", reviewRequest.getId());
+            } else {
+                log.debug("Campaign auto-start disabled for review request {}", reviewRequest.getId());
+            }
+        } catch (Exception e) {
+            log.error("❌ Failed to auto-start campaign for review request {}: {}",
+                    reviewRequest.getId(), e.getMessage(), e);
+            // Don't fail the review request creation if campaign fails
+        }
+    }
+
+    /**
+     * Determine if campaigns should auto-start for this business/user
+     */
+    private boolean shouldAutoStartCampaign(Business business, User user) {
+        // For now, always return true - you can add org-level settings later
+        // Future: Check organization settings, business preferences, etc.
+        return true;
+    }
+
+    /**
      * HELPER: Determine which email sending method to use based on template type
      */
     private boolean sendEmailWithTemplate(Customer customer, EmailTemplate template, ReviewRequest reviewRequest) {
@@ -431,7 +589,21 @@ public class ReviewRequestService {
             case CLICKED -> request.setClickedAt(OffsetDateTime.now(ZoneOffset.UTC));
             case COMPLETED -> {
                 request.setReviewedAt(OffsetDateTime.now(ZoneOffset.UTC));
-                // NEW: Trigger automation when review is completed
+
+                // CAMPAIGN INTEGRATION: Stop campaign when review is completed
+                if (request.getCampaignExecutionId() != null) {
+                    try {
+                        campaignExecutionService.stopCampaign(request.getCampaignExecutionId(),
+                                "Customer completed review");
+                        log.info("✅ Stopped campaign {} - customer completed review",
+                                request.getCampaignExecutionId());
+                    } catch (Exception e) {
+                        log.error("❌ Failed to stop campaign {}: {}",
+                                request.getCampaignExecutionId(), e.getMessage());
+                    }
+                }
+
+                // Trigger automation when review is completed
                 try {
                     automationTriggerService.onReviewRequestCompleted(request);
                 } catch (Exception e) {
@@ -457,6 +629,28 @@ public class ReviewRequestService {
                         return sendReviewRequestWithDefaultTemplate(user, customerId);
                     } catch (Exception e) {
                         log.error("Failed to send review request to customer {}: {}", customerId, e.getMessage());
+                        return null;
+                    }
+                })
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * CAMPAIGN INTEGRATION: Bulk create review requests with campaigns
+     */
+    @Transactional
+    public List<ReviewRequestDto> createBulkReviewRequestsWithCampaigns(User user, List<Long> customerIds, Long sequenceId) {
+        log.info("Creating bulk review requests with campaigns for {} customers using sequence {}",
+                customerIds.size(), sequenceId);
+
+        return customerIds.stream()
+                .map(customerId -> {
+                    try {
+                        return createReviewRequestWithCampaign(user, customerId, sequenceId);
+                    } catch (Exception e) {
+                        log.error("Failed to create campaign-managed review request for customer {}: {}",
+                                customerId, e.getMessage());
                         return null;
                     }
                 })

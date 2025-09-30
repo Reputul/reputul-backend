@@ -1,15 +1,18 @@
 package com.reputul.backend.services.campaign;
 
+import com.reputul.backend.dto.campaign.request.CreateSequenceRequest;
+import com.reputul.backend.dto.campaign.request.CreateStepRequest;
+import com.reputul.backend.dto.campaign.request.UpdateSequenceRequest;
 import com.reputul.backend.models.campaign.CampaignSequence;
 import com.reputul.backend.models.campaign.CampaignStep;
 import com.reputul.backend.enums.MessageType;
 import com.reputul.backend.repositories.campaign.CampaignSequenceRepository;
 import com.reputul.backend.repositories.campaign.CampaignStepRepository;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -42,11 +45,11 @@ public class CampaignSequenceService {
         sequence.setOrgId(orgId);
         sequence.setName(request.getName());
         sequence.setDescription(request.getDescription());
-        sequence.setIsDefault(request.getIsDefault());
+        sequence.setIsDefault(request.getIsDefault() != null ? request.getIsDefault() : false);
         sequence.setIsActive(true);
 
         // If this is set as default, unset other defaults
-        if (request.getIsDefault()) {
+        if (sequence.getIsDefault()) {
             unsetOtherDefaults(orgId);
         }
 
@@ -246,49 +249,45 @@ public class CampaignSequenceService {
     }
 
     private CampaignSequence createDefaultSequence(Long orgId) {
-        CreateSequenceRequest request = CreateSequenceRequest.builder()
-                .name("Default Review Collection")
-                .description("Proven 1 SMS + 3 email sequence for maximum review collection")
-                .isDefault(true)
-                .steps(List.of(
-                        // Step 1: Immediate SMS
-                        CreateStepRequest.builder()
-                                .stepNumber(1)
-                                .delayHours(0)
-                                .messageType(MessageType.SMS)
-                                .bodyTemplate("Hi {{customerName}}! How was your experience with {{businessName}}? We'd love to hear about it: {{reviewLink}}")
-                                .build(),
+        CreateSequenceRequest request = new CreateSequenceRequest();
+        request.setName("Default Review Collection");
+        request.setDescription("Proven 1 SMS + 3 email sequence for maximum review collection");
+        request.setIsDefault(true);
 
-                        // Step 2: Professional email after 24 hours
-                        CreateStepRequest.builder()
-                                .stepNumber(2)
-                                .delayHours(24)
-                                .messageType(MessageType.EMAIL_PROFESSIONAL)
-                                .subjectTemplate("How was your {{serviceType}} experience?")
-                                .bodyTemplate(getDefaultEmailTemplate("professional"))
-                                .build(),
+        List<CreateStepRequest> steps = List.of(
+                // Step 1: Immediate SMS
+                createStepRequest(1, 0, MessageType.SMS, null,
+                        "Hi {{customerName}}! How was your experience with {{businessName}}? We'd love to hear about it: {{reviewLink}}"),
 
-                        // Step 3: Personal follow-up after 5 days
-                        CreateStepRequest.builder()
-                                .stepNumber(3)
-                                .delayHours(120) // 5 days
-                                .messageType(MessageType.EMAIL_PLAIN)
-                                .subjectTemplate("Quick favor?")
-                                .bodyTemplate(getDefaultEmailTemplate("plain"))
-                                .build(),
+                // Step 2: Professional email after 24 hours
+                createStepRequest(2, 24, MessageType.EMAIL_PROFESSIONAL,
+                        "How was your {{serviceType}} experience?",
+                        getDefaultEmailTemplate("professional")),
 
-                        // Step 4: Final reminder after 14 days
-                        CreateStepRequest.builder()
-                                .stepNumber(4)
-                                .delayHours(336) // 14 days
-                                .messageType(MessageType.EMAIL_PLAIN)
-                                .subjectTemplate("Last chance to share your experience")
-                                .bodyTemplate(getDefaultEmailTemplate("final"))
-                                .build()
-                ))
-                .build();
+                // Step 3: Personal follow-up after 5 days
+                createStepRequest(3, 120, MessageType.EMAIL_PLAIN,
+                        "Quick favor?",
+                        getDefaultEmailTemplate("plain")),
 
+                // Step 4: Final reminder after 14 days
+                createStepRequest(4, 336, MessageType.EMAIL_PLAIN,
+                        "Last chance to share your experience",
+                        getDefaultEmailTemplate("final"))
+        );
+
+        request.setSteps(steps);
         return createSequence(orgId, request);
+    }
+
+    private CreateStepRequest createStepRequest(Integer stepNumber, Integer delayHours,
+                                                MessageType messageType, String subject, String body) {
+        CreateStepRequest request = new CreateStepRequest();
+        request.setStepNumber(stepNumber);
+        request.setDelayHours(delayHours);
+        request.setMessageType(messageType);
+        request.setSubjectTemplate(subject);
+        request.setBodyTemplate(body);
+        return request;
     }
 
     private String getDefaultEmailTemplate(String type) {
@@ -360,140 +359,5 @@ public class CampaignSequenceService {
 
             default -> "Thank you for choosing {{businessName}}! Please share your experience: {{reviewLink}}";
         };
-    }
-
-    // Request DTOs (you'll create these next)
-    public static class CreateSequenceRequest {
-        private String name;
-        private String description;
-        private Boolean isDefault;
-        private List<CreateStepRequest> steps;
-
-        // Builder pattern methods
-        public static CreateSequenceRequestBuilder builder() {
-            return new CreateSequenceRequestBuilder();
-        }
-
-        // Getters and setters
-        public String getName() { return name; }
-        public void setName(String name) { this.name = name; }
-
-        public String getDescription() { return description; }
-        public void setDescription(String description) { this.description = description; }
-
-        public Boolean getIsDefault() { return isDefault; }
-        public void setIsDefault(Boolean isDefault) { this.isDefault = isDefault; }
-
-        public List<CreateStepRequest> getSteps() { return steps; }
-        public void setSteps(List<CreateStepRequest> steps) { this.steps = steps; }
-
-        public static class CreateSequenceRequestBuilder {
-            private CreateSequenceRequest request = new CreateSequenceRequest();
-
-            public CreateSequenceRequestBuilder name(String name) {
-                request.setName(name);
-                return this;
-            }
-
-            public CreateSequenceRequestBuilder description(String description) {
-                request.setDescription(description);
-                return this;
-            }
-
-            public CreateSequenceRequestBuilder isDefault(Boolean isDefault) {
-                request.setIsDefault(isDefault);
-                return this;
-            }
-
-            public CreateSequenceRequestBuilder steps(List<CreateStepRequest> steps) {
-                request.setSteps(steps);
-                return this;
-            }
-
-            public CreateSequenceRequest build() {
-                return request;
-            }
-        }
-    }
-
-    public static class CreateStepRequest {
-        private Integer stepNumber;
-        private Integer delayHours;
-        private MessageType messageType;
-        private String subjectTemplate;
-        private String bodyTemplate;
-
-        public static CreateStepRequestBuilder builder() {
-            return new CreateStepRequestBuilder();
-        }
-
-        // Getters and setters
-        public Integer getStepNumber() { return stepNumber; }
-        public void setStepNumber(Integer stepNumber) { this.stepNumber = stepNumber; }
-
-        public Integer getDelayHours() { return delayHours; }
-        public void setDelayHours(Integer delayHours) { this.delayHours = delayHours; }
-
-        public MessageType getMessageType() { return messageType; }
-        public void setMessageType(MessageType messageType) { this.messageType = messageType; }
-
-        public String getSubjectTemplate() { return subjectTemplate; }
-        public void setSubjectTemplate(String subjectTemplate) { this.subjectTemplate = subjectTemplate; }
-
-        public String getBodyTemplate() { return bodyTemplate; }
-        public void setBodyTemplate(String bodyTemplate) { this.bodyTemplate = bodyTemplate; }
-
-        public static class CreateStepRequestBuilder {
-            private CreateStepRequest request = new CreateStepRequest();
-
-            public CreateStepRequestBuilder stepNumber(Integer stepNumber) {
-                request.setStepNumber(stepNumber);
-                return this;
-            }
-
-            public CreateStepRequestBuilder delayHours(Integer delayHours) {
-                request.setDelayHours(delayHours);
-                return this;
-            }
-
-            public CreateStepRequestBuilder messageType(MessageType messageType) {
-                request.setMessageType(messageType);
-                return this;
-            }
-
-            public CreateStepRequestBuilder subjectTemplate(String subjectTemplate) {
-                request.setSubjectTemplate(subjectTemplate);
-                return this;
-            }
-
-            public CreateStepRequestBuilder bodyTemplate(String bodyTemplate) {
-                request.setBodyTemplate(bodyTemplate);
-                return this;
-            }
-
-            public CreateStepRequest build() {
-                return request;
-            }
-        }
-    }
-
-    public static class UpdateSequenceRequest {
-        private String name;
-        private String description;
-        private Boolean isDefault;
-        private Boolean isActive;
-
-        // Getters and setters
-        public String getName() { return name; }
-        public void setName(String name) { this.name = name; }
-
-        public String getDescription() { return description; }
-        public void setDescription(String description) { this.description = description; }
-
-        public Boolean getIsDefault() { return isDefault; }
-        public void setIsDefault(Boolean isDefault) { this.isDefault = isDefault; }
-
-        public Boolean getIsActive() { return isActive; }
-        public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     }
 }
