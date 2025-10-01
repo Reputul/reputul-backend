@@ -21,8 +21,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -360,6 +364,35 @@ public class CampaignController {
             return ResponseEntity.noContent().build();
         } catch (EntityNotFoundException e) {
             return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/analytics")
+    public ResponseEntity<Map<String, Object>> getCampaignAnalytics(
+            @RequestParam String startDate,
+            @RequestParam String endDate,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        try {
+            String email = userDetails.getUsername();
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // TODO: Implement actual analytics logic
+            // For now, return dummy data
+            Map<String, Object> analytics = new HashMap<>();
+            analytics.put("totalExecutions", 0);
+            analytics.put("activeExecutions", 0);
+            analytics.put("completedExecutions", 0);
+            analytics.put("failedExecutions", 0);
+            analytics.put("completionRate", 0.0);
+            analytics.put("averageStepsCompleted", 0.0);
+            analytics.put("sequencePerformance", new ArrayList<>());
+
+            return ResponseEntity.ok(analytics);
+        } catch (Exception e) {
+            log.error("Error getting campaign analytics: {}", e.getMessage());
+            return ResponseEntity.internalServerError().build();
         }
     }
 
