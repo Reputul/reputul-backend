@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/automation/monitoring")
+@RequestMapping("/api/v1/automation/monitoring")
 @RequiredArgsConstructor
 @Slf4j
 public class AutomationMonitoringController {

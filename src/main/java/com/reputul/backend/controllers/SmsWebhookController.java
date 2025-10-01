@@ -24,7 +24,7 @@ import java.util.Optional;
  * If you also wire carrier delivery receipts, you can POST to /api/webhooks/sms/delivery.
  */
 @RestController
-@RequestMapping("/api/webhooks/sms")
+@RequestMapping("/api/v1/webhooks/sms")
 @RequiredArgsConstructor
 @Slf4j
 public class SmsWebhookController {

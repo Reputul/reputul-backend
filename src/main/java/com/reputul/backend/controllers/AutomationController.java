@@ -26,7 +26,7 @@ import java.util.Map;
  * Provides endpoints for managing automation workflows and executions
  */
 @RestController
-@RequestMapping("/api/automation")
+@RequestMapping("/api/v1/automation")
 @RequiredArgsConstructor
 @Slf4j
 public class AutomationController {

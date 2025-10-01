@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * Configure Twilio Messaging Service -> Inbound "A message comes in" (POST) -> {your-domain}/api/webhooks/sms/inbound
  */
 @RestController
-@RequestMapping("/api/webhooks/sms")
+@RequestMapping("/api/v1/webhooks/sms")
 @RequiredArgsConstructor
 @Slf4j
 public class SmsInboundWebhookController {

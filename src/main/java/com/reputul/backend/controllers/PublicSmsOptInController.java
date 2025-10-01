@@ -24,7 +24,7 @@ import java.util.Optional;
  * Required for Twilio toll-free verification to show customer-initiated consent
  */
 @RestController
-@RequestMapping("/api/public/sms")
+@RequestMapping("/api/v1/public/sms")
 @RequiredArgsConstructor
 @Slf4j
 @CrossOrigin(origins = {"https://reputul.com", "https://www.reputul.com", "http://localhost:3000"})

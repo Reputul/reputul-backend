@@ -15,7 +15,7 @@ import java.util.Optional;
  * Used by SMS signup page and other public-facing features
  */
 @RestController
-@RequestMapping("/api/public/businesses")
+@RequestMapping("/api/v1/public/businesses")
 @RequiredArgsConstructor
 @Slf4j
 @CrossOrigin(origins = {"https://reputul.com", "https://www.reputul.com", "http://localhost:3000"})

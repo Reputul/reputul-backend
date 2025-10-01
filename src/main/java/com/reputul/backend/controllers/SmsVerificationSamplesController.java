@@ -17,7 +17,7 @@ import java.util.Map;
  * Use this to get real examples with your business names and templates
  */
 @RestController
-@RequestMapping("/api/sms-samples")
+@RequestMapping("/api/v1/sms-samples")
 @RequiredArgsConstructor
 @Slf4j
 public class SmsVerificationSamplesController {

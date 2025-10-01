@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/api/businesses")
+@RequestMapping("/api/v1/businesses")
 public class BusinessController {
 
     private final BusinessRepository businessRepo;

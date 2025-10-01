@@ -28,7 +28,7 @@ import java.util.Map;
  * - Plan entitlement checking
  */
 @RestController
-@RequestMapping("/api/billing")
+@RequestMapping("/api/v1/billing")
 @Slf4j
 public class BillingController {
 

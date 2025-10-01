@@ -18,7 +18,7 @@ import java.util.HashMap;
  * This will show you immediately how much fairer the new algorithm is
  */
 @RestController
-@RequestMapping("/api/test")
+@RequestMapping("/api/v1/test")
 public class WilsonTestController {
 
     private final WilsonScoreService wilsonScoreService;

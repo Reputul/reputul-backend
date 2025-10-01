@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/email-templates")
+@RequestMapping("/api/v1/email-templates")
 @RequiredArgsConstructor
 public class EmailTemplateController {
 

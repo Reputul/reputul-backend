@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
  * Enhanced Reputation Controller with Wilson Score endpoints
  */
 @RestController
-@RequestMapping("/api/reputation")
+@RequestMapping("/api/v1/reputation")
 @Slf4j
 public class ReputationController {
 

@@ -18,7 +18,7 @@ import java.util.Map;
  * REST API for managing automation workflow templates and testing
  */
 @RestController
-@RequestMapping("/api/automation/templates")
+@RequestMapping("/api/v1/automation/templates")
 @RequiredArgsConstructor
 @Slf4j
 public class AutomationTemplateController {

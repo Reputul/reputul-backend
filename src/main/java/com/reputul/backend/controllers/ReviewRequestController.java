@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/review-requests")
+@RequestMapping("/api/v1/review-requests")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "http://localhost:3000")
 @Slf4j

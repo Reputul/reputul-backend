@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/campaigns")
+@RequestMapping("/api/v1/campaigns")
 @RequiredArgsConstructor
 @Slf4j
 public class CampaignController {

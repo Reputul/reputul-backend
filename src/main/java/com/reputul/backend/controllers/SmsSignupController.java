@@ -24,7 +24,7 @@ import java.util.Optional;
  * Handles public SMS consent registration
  */
 @RestController
-@RequestMapping("/api/sms-signup")
+@RequestMapping("/api/v1/sms-signup")
 @RequiredArgsConstructor
 @Slf4j
 public class SmsSignupController {
