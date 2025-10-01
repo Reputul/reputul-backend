@@ -38,54 +38,41 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable()) // Disable CSRF for API
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(auth -> auth
+                        // OpenAPI/Swagger endpoints
+                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
-                .authorizeHttpRequests(authz -> authz
-                        // Public endpoints - no authentication required
-                        .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/health/**").permitAll()
-                        .requestMatchers("/api/test/**").permitAll()
-
-                        // Authentication endpoints
+                        // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // Public API endpoints
-                        .requestMatchers("/api/public/**").permitAll()
-
-                        // Waitlist endpoints (for landing page)
-                        .requestMatchers("/api/waitlist/**").permitAll()
+                        // Health check
+                        .requestMatchers("/api/health").permitAll()
 
                         // Public review endpoints
-                        .requestMatchers(HttpMethod.GET, "/api/reviews/business/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/reviews/public/**").permitAll()
+                        .requestMatchers("/api/v1/public/**").permitAll()
 
-                        // Customer direct endpoints (no auth for review submission)
-                        .requestMatchers("/api/customers/**").permitAll()
-                        .requestMatchers("/api/review-requests/send-direct").permitAll()
+                        // File serving
+                        .requestMatchers("/api/v1/files/**").permitAll()
 
-                        // **NEW: SMS endpoints - MUST be public for Twilio compliance**
-                        .requestMatchers("/api/sms-samples/**").permitAll()
-                        .requestMatchers("/api/sms-signup/**").permitAll()
+                        // Webhooks (no auth needed)
+                        .requestMatchers("/api/v1/webhooks/**").permitAll()
 
-                        // **CRITICAL: Stripe webhook endpoints - MUST be public**
-                        .requestMatchers(HttpMethod.POST, "/api/billing/webhook/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/billing/webhook/**").permitAll()
-                        .requestMatchers("/api/webhooks/**").permitAll() // Generic webhooks
+                        // Public waitlist (if you want it public)
+                        .requestMatchers("/api/v1/waitlist/**").permitAll()
 
-                        // SMS/Email webhook endpoints (for delivery status)
-                        .requestMatchers(HttpMethod.POST, "/api/sms/webhook/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/email/webhook/**").permitAll()
+                        // Customer feedback pages (public)
+                        .requestMatchers("/api/v1/customers/*/feedback-info").permitAll()
 
-                        // All other endpoints require authentication
+                        // Everything else requires authentication
                         .anyRequest().authenticated()
                 )
-
-                // Add JWT filter before username/password authentication
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                );
 
         return http.build();
     }
