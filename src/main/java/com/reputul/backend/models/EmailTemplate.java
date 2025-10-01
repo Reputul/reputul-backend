@@ -55,7 +55,9 @@ public class EmailTemplate {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        createdAt = now;
+        updatedAt = now;
         if (availableVariables == null) {
             availableVariables = "{{customerName}},{{businessName}},{{serviceType}},{{serviceDate}},{{businessPhone}},{{businessWebsite}}";
         }

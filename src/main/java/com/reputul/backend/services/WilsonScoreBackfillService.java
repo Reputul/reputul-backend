@@ -71,10 +71,6 @@ public class WilsonScoreBackfillService implements CommandLineRunner {
         log.info("🎉 Wilson Score migration completed!");
         log.info("✅ Successfully migrated: {} businesses", successCount);
         log.info("❌ Failed migrations: {} businesses", errorCount);
-        log.info("💡 Next steps:");
-        log.info("   1. Comment out @Component annotation to prevent re-running");
-        log.info("   2. Test the new Wilson Score endpoints");
-        log.info("   3. Update your frontend to use the new metrics");
 
         if (errorCount > 0) {
             log.warn("⚠️  Some businesses failed to migrate. Check logs above for details.");

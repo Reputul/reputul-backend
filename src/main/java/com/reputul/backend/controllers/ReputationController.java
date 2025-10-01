@@ -297,6 +297,38 @@ public class ReputationController {
     }
 
     /**
+     * NEW: Get reputation breakdown for dashboard cards
+     * GET /api/reputation/business/{businessId}/breakdown
+     */
+    @GetMapping("/business/{businessId}/breakdown")
+    public ResponseEntity<ReputationService.ReputationBreakdown> getReputationBreakdown(
+            @PathVariable Long businessId,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        try {
+            // Verify user owns this business (CRITICAL: tenant scoping)
+            String email = userDetails.getUsername();
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            Business business = businessRepository.findByIdAndUser(businessId, user)
+                    .orElse(null);
+
+            if (business == null) {
+                log.warn("User {} attempted to access business {} they don't own", email, businessId);
+                return ResponseEntity.notFound().build();
+            }
+
+            ReputationService.ReputationBreakdown breakdown = reputationService.getReputationBreakdown(businessId);
+
+            return ResponseEntity.ok(breakdown);
+        } catch (Exception e) {
+            log.error("Error getting reputation breakdown for business {}: {}", businessId, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
      * Helper method to generate improvement suggestions
      */
     private List<String> generateImprovementSuggestions(ReputationService.ReputationBreakdown breakdown) {
