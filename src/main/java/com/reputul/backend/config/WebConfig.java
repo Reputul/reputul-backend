@@ -16,25 +16,23 @@ public class WebConfig implements WebMvcConfigurer {
     @Value("${cors.allowed.origins:https://reputul.com,https://www.reputul.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173}")
     private String allowedOrigins;
 
-    // Add this field
     private final CurrentUserArgumentResolver currentUserArgumentResolver;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        // Your existing CORS configuration
         String[] origins = allowedOrigins.split(",");
         System.out.println("CORS allowed origins: " + java.util.Arrays.toString(origins));
 
+        // Maps to ALL paths including /api/auth/**, /api/v1/**, etc.
         registry.addMapping("/**")
                 .allowedOrigins(origins)
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD")
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH")
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers")
                 .allowCredentials(true)
                 .maxAge(3600);
     }
 
-    // Add this new method
     @Override
     public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
         resolvers.add(currentUserArgumentResolver);
