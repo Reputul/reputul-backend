@@ -53,6 +53,18 @@ public class Business {
     @Column(name = "last_reputation_update")
     private OffsetDateTime lastReputationUpdate;
 
+    @Column(name = "logo_filename")
+    private String logoFilename;
+
+    @Column(name = "logo_url", length = 500)
+    private String logoUrl;
+
+    @Column(name = "logo_content_type", length = 100)
+    private String logoContentType;
+
+    @Column(name = "logo_uploaded_at")
+    private OffsetDateTime logoUploadedAt;
+
     private String badge;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;

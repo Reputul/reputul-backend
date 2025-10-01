@@ -49,8 +49,8 @@ public class EmailService {
     @Value("${sendgrid.from.name}")
     private String fromName;
 
-    @Value("${app.base.url:http://localhost:3000}")
-    private String baseUrl;
+    @Value("${app.frontend.url}")
+    private String frontendUrl;
 
     @Value("${sendgrid.webhook.verification.key:}")
     private String webhookVerificationKey;
@@ -372,7 +372,7 @@ public class EmailService {
      * GOOGLE COMPLIANT: Generate review link that goes to rating gate
      */
     public String generateReviewLink(Business business) {
-        return String.format("%s/feedback-gate/business/%d", baseUrl, business.getId());
+        return String.format("%s/feedback-gate/business/%d", frontendUrl, business.getId());
     }
 
     /**
@@ -382,7 +382,7 @@ public class EmailService {
         log.info("Sending password reset email to: {}", toEmail);
 
         try {
-            String resetUrl = baseUrl + "/reset-password?token=" + resetToken;
+            String resetUrl = frontendUrl + "/reset-password?token=" + resetToken;
             String subject = "Reset Your Reputul Password";
             String htmlContent = createPasswordResetEmailBody(resetUrl);
 
@@ -618,15 +618,15 @@ public class EmailService {
         }
 
         String unsubscribeUrl = organizationId != null ?
-                String.format("%s/unsubscribe?org=%d", baseUrl, organizationId) :
-                String.format("%s/unsubscribe", baseUrl);
+                String.format("%s/unsubscribe?org=%d", frontendUrl, organizationId) :
+                String.format("%s/unsubscribe", frontendUrl);
 
         String canSpamFooter = String.format("""
             <!-- CAN-SPAM Footer -->
             <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #6b7280;">
                 <!-- footer content -->
             </div>
-            """, unsubscribeUrl, baseUrl, baseUrl);
+            """, unsubscribeUrl, frontendUrl, frontendUrl);
 
         if (htmlContent.contains("</body>")) {
             return htmlContent.replace("</body>", canSpamFooter + "</body>");

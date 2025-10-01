@@ -6,8 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -31,8 +29,8 @@ public class SmsTemplateService {
     @Value("${app.support.email:support@reputul.com}")
     private String supportEmail;
 
-    @Value("${app.base.url:http://localhost:3000}")
-    private String baseUrl;
+    @Value("${app.frontend.url}")
+    private String frontendUrl;
 
     // Compliance validation patterns
     private static final Pattern STOP_KEYWORD_PATTERN = Pattern.compile("\\b(STOP|HELP)\\b", Pattern.CASE_INSENSITIVE);
@@ -139,7 +137,7 @@ public class SmsTemplateService {
      */
     private String generateBrandedReviewUrl(Customer customer) {
         // Use reputul.com domain instead of public shorteners like bit.ly
-        return String.format("%s/review/%s", baseUrl, customer.getId());
+        return String.format("%s/review/%s", frontendUrl, customer.getId());
     }
 
     /**

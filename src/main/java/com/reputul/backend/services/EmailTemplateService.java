@@ -34,8 +34,8 @@ public class EmailTemplateService {
     private EntityManager entityManager;
     private final EmailTemplateRepository emailTemplateRepository;
 
-    @Value("${app.base.url:http://localhost:3000}")
-    private String baseUrl;
+    @Value("${app.frontend.url}")
+    private String frontendUrl;
 
     // GOOGLE COMPLIANT: Main method to safely update user templates
     @Transactional
@@ -887,7 +887,7 @@ public class EmailTemplateService {
         String googleUrl = generateGoogleReviewUrl(business);
         String facebookUrl = generateFacebookReviewUrl(business);
         String yelpUrl = generateYelpReviewUrl(business);
-        String privateFeedbackUrl = baseUrl + "/feedback/" + customer.getId();
+        String privateFeedbackUrl = frontendUrl + "/feedback/" + customer.getId();
 
         return String.format("""
             <!DOCTYPE html>
@@ -1007,8 +1007,8 @@ public class EmailTemplateService {
         variables.put("googleReviewUrl", generateGoogleReviewUrl(business));
         variables.put("facebookReviewUrl", generateFacebookReviewUrl(business));
         variables.put("yelpReviewUrl", generateYelpReviewUrl(business));
-        variables.put("privateFeedbackUrl", baseUrl + "/feedback/" + customer.getId());
-        variables.put("unsubscribeUrl", baseUrl + "/unsubscribe/" + customer.getId());
+        variables.put("privateFeedbackUrl", frontendUrl + "/feedback/" + customer.getId());
+        variables.put("unsubscribeUrl", frontendUrl + "/unsubscribe/" + customer.getId());
 
         return variables;
     }

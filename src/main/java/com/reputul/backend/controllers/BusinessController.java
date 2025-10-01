@@ -8,29 +8,42 @@ import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.ReviewRepository;
 import com.reputul.backend.repositories.UserRepository;
+import com.reputul.backend.services.BusinessService;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/businesses")
 public class BusinessController {
 
     private final BusinessRepository businessRepo;
+    private final BusinessService businessService;
     private final UserRepository userRepo;
     private final ReviewRepository reviewRepo;
+    private static final List<String> ALLOWED_CONTENT_TYPES = Arrays.asList(
+            "image/jpeg",
+            "image/jpg",
+            "image/png",
+            "image/svg+xml",
+            "image/webp"
+    );
+    private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-    public BusinessController(BusinessRepository businessRepo, UserRepository userRepo, ReviewRepository reviewRepo) {
+
+    public BusinessController(BusinessRepository businessRepo, BusinessService businessService, UserRepository userRepo, ReviewRepository reviewRepo) {
         this.businessRepo = businessRepo;
+        this.businessService = businessService;
         this.userRepo = userRepo;
         this.reviewRepo = reviewRepo;
     }
@@ -185,6 +198,65 @@ public class BusinessController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error deleting business: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Upload business logo
+     */
+    @PostMapping(value = "/{id}/logo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadBusinessLogo(
+            @PathVariable Long id,
+            @RequestParam("file") @NotNull MultipartFile file,
+            Authentication authentication) {
+
+        try {
+            // Validate file
+            if (file.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "File is empty"));
+            }
+
+            // Validate file size
+            if (file.getSize() > MAX_FILE_SIZE) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "File size exceeds 5MB limit"));
+            }
+
+            // Validate content type
+            String contentType = file.getContentType();
+            if (!ALLOWED_CONTENT_TYPES.contains(contentType)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid file type. Allowed: JPG, PNG, SVG, WebP"));
+            }
+
+            // Update logo
+            Business business = businessService.updateLogo(id, file, authentication);
+
+            return ResponseEntity.ok(business);
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to upload logo: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete business logo
+     */
+    @DeleteMapping("/{id}/logo")
+    public ResponseEntity<?> deleteBusinessLogo(
+            @PathVariable Long id,
+            Authentication authentication) {
+        try {
+            businessService.deleteLogo(id, authentication);
+            return ResponseEntity.ok(Map.of("message", "Logo deleted successfully"));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to delete logo: " + e.getMessage()));
         }
     }
 }
