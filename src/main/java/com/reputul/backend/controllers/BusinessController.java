@@ -187,4 +187,87 @@ public class BusinessController {
                     .body("Error deleting business: " + e.getMessage());
         }
     }
+
+    // Add this method to BusinessController.java
+
+    /**
+     * Get review platform configuration for a business
+     */
+    @GetMapping("/{id}/review-platforms")
+    public ResponseEntity<?> getReviewPlatforms(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            Business business = businessRepo.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Business not found"));
+
+            // Verify ownership
+            if (!business.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to access this business");
+            }
+
+            Map<String, String> platforms = Map.of(
+                    "googlePlaceId", business.getGooglePlaceId() != null ? business.getGooglePlaceId() : "",
+                    "facebookPageUrl", business.getFacebookPageUrl() != null ? business.getFacebookPageUrl() : "",
+                    "yelpPageUrl", business.getYelpPageUrl() != null ? business.getYelpPageUrl() : ""
+            );
+
+            return ResponseEntity.ok(platforms);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error fetching review platforms: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Update review platform configuration for a business
+     */
+    @PutMapping("/{id}/review-platforms")
+    public ResponseEntity<?> updateReviewPlatforms(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> platformData,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            Business business = businessRepo.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Business not found"));
+
+            // Verify ownership
+            if (!business.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to update this business");
+            }
+
+            // Update platform URLs
+            business.setGooglePlaceId(platformData.get("googlePlaceId"));
+            business.setFacebookPageUrl(platformData.get("facebookPageUrl"));
+            business.setYelpPageUrl(platformData.get("yelpPageUrl"));
+
+            // Mark as configured if at least one platform is set
+            boolean hasAtLeastOnePlatform =
+                    (platformData.get("googlePlaceId") != null && !platformData.get("googlePlaceId").isEmpty()) ||
+                            (platformData.get("facebookPageUrl") != null && !platformData.get("facebookPageUrl").isEmpty()) ||
+                            (platformData.get("yelpPageUrl") != null && !platformData.get("yelpPageUrl").isEmpty());
+
+            business.setReviewPlatformsConfigured(hasAtLeastOnePlatform);
+
+            businessRepo.save(business);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Review platforms updated successfully",
+                    "reviewPlatformsConfigured", hasAtLeastOnePlatform
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error updating review platforms: " + e.getMessage());
+        }
+    }
 }
