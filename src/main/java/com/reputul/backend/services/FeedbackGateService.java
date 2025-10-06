@@ -26,8 +26,8 @@ public class FeedbackGateService {
     private final CustomerRepository customerRepository;
     private final ReviewRepository reviewRepository;
 
-    @Value("${app.base.url:http://localhost:3000}")
-    private String baseUrl;
+    @Value("${app.frontend.url}")
+    private String frontendUrl;
 
     /**
      * GOOGLE-COMPLIANT: Process rating gate and show ALL options to ALL customers
@@ -85,7 +85,7 @@ public class FeedbackGateService {
         String googleReviewUrl = ReviewLinks.googleReviewUrl(business);
         String facebookReviewUrl = ReviewLinks.facebookReviewUrl(business);
         String yelpReviewUrl = ReviewLinks.yelpUrl(business);
-        String privateFeedbackUrl = baseUrl + "/feedback/" + customer.getId();
+        String privateFeedbackUrl = frontendUrl + "/feedback/" + customer.getId();
 
         // Customize messaging based on rating, but show ALL options
         String message;

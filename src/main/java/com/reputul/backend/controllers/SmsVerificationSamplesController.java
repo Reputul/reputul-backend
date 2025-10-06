@@ -33,8 +33,8 @@ public class SmsVerificationSamplesController {
     @Value("${app.support.email:support@reputul.com}")
     private String supportEmail;
 
-    @Value("${app.base.url:https://app.reputul.com}")
-    private String baseUrl;
+    @Value("${app.frontend.url}")
+    private String frontendUrl;
 
     /**
      * Generate sample SMS messages for Twilio verification submission
@@ -118,7 +118,7 @@ public class SmsVerificationSamplesController {
             Map<String, Object> businessInfo = new HashMap<>();
             businessInfo.put("businessName", businessName);
             businessInfo.put("supportEmail", supportEmail);
-            businessInfo.put("websiteUrl", baseUrl);
+            businessInfo.put("websiteUrl", frontendUrl);
             businessInfo.put("useCase", "Transactional review requests and customer service notifications");
             businessInfo.put("messageFrequency", "1-3 messages per customer per month");
             businessInfo.put("optInMethod", "Web form with explicit consent checkbox + double opt-in confirmation");

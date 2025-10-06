@@ -61,7 +61,7 @@ public class StripeService {
     @Value("${stripe.coupon.50.off}")
     private String stripeCoupon50Off;
 
-    @Value("${frontend.url}")
+    @Value("${app.frontend.url}")
     private String frontendUrl;
 
     @Value("${billing.portal.return.url:#{null}}")
