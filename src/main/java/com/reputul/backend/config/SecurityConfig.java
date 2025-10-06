@@ -42,24 +42,20 @@ public class SecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-                .authorizeHttpRequests(auth -> auth
+                .authorizeHttpRequests(authz -> authz
                         // Allow all OPTIONS requests (CORS preflight)
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                .authorizeHttpRequests(authz -> authz
-                        // Public endpoints - no authentication required
+                        // Health check endpoints
                         .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/health/**").permitAll()
                         .requestMatchers("/api/test/**").permitAll()
+
                         // OpenAPI/Swagger endpoints
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
                         // Auth endpoints (unversioned)
                         .requestMatchers("/api/auth/**").permitAll()
-
-                        // Health check
-                        .requestMatchers("/api/health", "/api/health/**").permitAll()
-                        .requestMatchers("/api/test/**").permitAll()
 
                         // Public review endpoints (versioned and unversioned)
                         .requestMatchers("/api/v1/public/**").permitAll()

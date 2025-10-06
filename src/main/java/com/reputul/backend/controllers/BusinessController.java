@@ -257,7 +257,8 @@ public class BusinessController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to delete logo: " + e.getMessage()));
-    // Add this method to BusinessController.java
+        }
+    }
 
     /**
      * Get review platform configuration for a business
