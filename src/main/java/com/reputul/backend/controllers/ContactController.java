@@ -26,7 +26,7 @@ import java.io.IOException;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/contacts")
+@RequestMapping("/api/v1/contacts")
 @CrossOrigin(origins = {"http://localhost:3000", "https://reputul.com"})
 public class ContactController {
 

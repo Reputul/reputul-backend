@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/templates")
+@RequestMapping("/api/v1/templates")
 @RequiredArgsConstructor
 @Slf4j
 public class TemplateManagementController {

@@ -21,9 +21,6 @@ import org.springframework.beans.factory.annotation.Value;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Security configuration with proper webhook handling and CORS setup
- */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
@@ -38,11 +35,16 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable()) // Disable CSRF for API
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
+                .authorizeHttpRequests(auth -> auth
+                        // Allow all OPTIONS requests (CORS preflight)
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
                 .authorizeHttpRequests(authz -> authz
                         // Public endpoints - no authentication required
@@ -52,41 +54,53 @@ public class SecurityConfig {
                         // OpenAPI/Swagger endpoints
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
-                        // Authentication endpoints
+                        // Auth endpoints (unversioned)
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // Public API endpoints
+                        // Health check
+                        .requestMatchers("/api/health", "/api/health/**").permitAll()
+                        .requestMatchers("/api/test/**").permitAll()
+
+                        // Public review endpoints (versioned and unversioned)
+                        .requestMatchers("/api/v1/public/**").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
-
-                        // Waitlist endpoints (for landing page)
-                        .requestMatchers("/api/waitlist/**").permitAll()
-
-                        // Public review endpoints
                         .requestMatchers(HttpMethod.GET, "/api/reviews/business/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/reviews/public/**").permitAll()
+
+                        // Public business endpoints (for public pages)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/businesses/*").permitAll()
+
+                        // File serving
+                        .requestMatchers("/api/v1/files/**").permitAll()
+
+                        // Webhooks (no auth needed)
+                        .requestMatchers("/api/v1/webhooks/**").permitAll()
+                        .requestMatchers("/api/webhooks/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/sms/webhook/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/email/webhook/**").permitAll()
+
+                        // Stripe webhook endpoints (MUST be public)
+                        .requestMatchers(HttpMethod.POST, "/api/billing/webhook/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/billing/webhook/**").permitAll()
+
+                        // Waitlist endpoints (for landing page)
+                        .requestMatchers("/api/v1/waitlist/**").permitAll()
+                        .requestMatchers("/api/waitlist/**").permitAll()
+
+                        // SMS endpoints (for Twilio compliance)
+                        .requestMatchers("/api/sms-samples/**").permitAll()
+                        .requestMatchers("/api/sms-signup/**").permitAll()
 
                         // Customer direct endpoints (no auth for review submission)
                         .requestMatchers("/api/customers/**").permitAll()
                         .requestMatchers("/api/review-requests/send-direct").permitAll()
 
-                        // **NEW: SMS endpoints - MUST be public for Twilio compliance**
-                        .requestMatchers("/api/sms-samples/**").permitAll()
-                        .requestMatchers("/api/sms-signup/**").permitAll()
+                        // Customer feedback pages (public)
+                        .requestMatchers("/api/v1/customers/*/feedback-info").permitAll()
 
-                        // **CRITICAL: Stripe webhook endpoints - MUST be public**
-                        .requestMatchers(HttpMethod.POST, "/api/billing/webhook/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/billing/webhook/**").permitAll()
-                        .requestMatchers("/api/webhooks/**").permitAll() // Generic webhooks
-
-                        // SMS/Email webhook endpoints (for delivery status)
-                        .requestMatchers(HttpMethod.POST, "/api/sms/webhook/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/email/webhook/**").permitAll()
-
-                        // All other endpoints require authentication
+                        // Everything else requires authentication
                         .anyRequest().authenticated()
                 )
-
-                // Add JWT filter before username/password authentication
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -96,22 +110,20 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
-        // Parse allowed origins from properties
         List<String> origins = Arrays.asList(allowedOrigins.split(","));
         configuration.setAllowedOrigins(origins);
 
-        // Allow all standard HTTP methods
         configuration.setAllowedMethods(Arrays.asList(
                 "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"
         ));
 
-        // Allow all headers (including Authorization)
         configuration.setAllowedHeaders(Arrays.asList("*"));
 
-        // Allow credentials for JWT tokens
-        configuration.setAllowCredentials(true);
+        configuration.setExposedHeaders(Arrays.asList(
+                "Authorization", "Content-Type", "X-Requested-With", "Accept", "Origin"
+        ));
 
-        // Cache preflight responses for 1 hour
+        configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -122,7 +134,7 @@ public class SecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12); // Strength 12 for security
+        return new BCryptPasswordEncoder(12);
     }
 
     @Bean

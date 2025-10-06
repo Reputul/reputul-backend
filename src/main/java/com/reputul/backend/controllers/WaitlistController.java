@@ -15,7 +15,7 @@ import java.time.ZoneOffset;
 import java.util.Random;
 
 @RestController
-@RequestMapping("/api/waitlist")
+@RequestMapping("/api/v1/waitlist")
 @RequiredArgsConstructor
 @Slf4j
 public class WaitlistController {

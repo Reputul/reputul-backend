@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/customers")
+@RequestMapping("/api/v1/customers")
 @RequiredArgsConstructor
 // REMOVED: @CrossOrigin(origins = "*") - this was causing the CORS conflict
 public class CustomerController {

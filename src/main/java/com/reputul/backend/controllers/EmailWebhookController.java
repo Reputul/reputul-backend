@@ -31,7 +31,7 @@ import java.util.Optional;
  * Events: delivered, open, click, bounce, dropped, deferred, processed, etc.
  */
 @RestController
-@RequestMapping("/api/webhooks/email")
+@RequestMapping("/api/v1/webhooks/email")
 @RequiredArgsConstructor
 @Slf4j
 public class EmailWebhookController {

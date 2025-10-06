@@ -15,7 +15,7 @@ import java.time.ZoneOffset;
  * Use BillingController for new Stripe integration
  */
 @RestController
-@RequestMapping("/api/subscriptions")
+@RequestMapping("/api/v1/subscriptions")
 public class SubscriptionController {
 
     private final SubscriptionRepository subscriptionRepo;

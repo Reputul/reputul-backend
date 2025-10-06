@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/api/customers")
+@RequestMapping("/api/v1/customers")
 @RequiredArgsConstructor
 @Slf4j
 public class CustomerFeedbackController {

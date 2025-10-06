@@ -22,7 +22,7 @@ import java.util.Map;
  * Compatible with all Stripe Java library versions
  */
 @RestController
-@RequestMapping("/api/billing/webhook")
+@RequestMapping("/api/v1/billing/webhook")
 @Slf4j
 public class WebhookController {
 
