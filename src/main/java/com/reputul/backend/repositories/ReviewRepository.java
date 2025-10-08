@@ -211,4 +211,13 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
      */
     @Query("SELECT r FROM Review r WHERE r.business.id = :businessId AND r.rating <= 3 AND r.source IN ('public', 'manual') ORDER BY r.createdAt DESC")
     List<Review> findReviewsNeedingAttention(@Param("businessId") Long businessId);
+
+    /**
+     * Find review by business, source, and source review ID (for deduplication)
+     */
+    Optional<Review> findByBusinessIdAndSourceAndSourceReviewId(
+            Long businessId,
+            String source,
+            String sourceReviewId
+    );
 }
