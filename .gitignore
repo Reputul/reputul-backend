@@ -8,6 +8,9 @@ target/
 .env
 src/main/resources/application-dev.properties
 
+# Ignore shell scripts
+src/main/test-login.sh
+
 
 
 ### STS ###

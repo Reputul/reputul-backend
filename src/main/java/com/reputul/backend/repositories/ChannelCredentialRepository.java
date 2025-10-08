@@ -1,0 +1,55 @@
+package com.reputul.backend.repositories;
+
+import com.reputul.backend.models.ChannelCredential;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface ChannelCredentialRepository extends JpaRepository<ChannelCredential, Long> {
+
+    /**
+     * Find all credentials for a business
+     */
+    List<ChannelCredential> findByBusinessId(Long businessId);
+
+    /**
+     * Find credentials by business and status
+     */
+    List<ChannelCredential> findByBusinessIdAndStatus(Long businessId, ChannelCredential.CredentialStatus status);
+
+    Optional<ChannelCredential> findByBusinessIdAndPlatformType(Long businessId, ChannelCredential.PlatformType platformType);
+
+    /**
+     * Find credentials by organization
+     */
+    List<ChannelCredential> findByOrganizationId(Long organizationId);
+
+    /**
+     * Find active credentials due for sync
+     */
+    @Query("SELECT c FROM ChannelCredential c WHERE c.status = :status " +
+            "AND c.nextSyncScheduled IS NOT NULL " +
+            "AND c.nextSyncScheduled <= :now")
+    List<ChannelCredential> findDueForSync(
+            @Param("now") OffsetDateTime now,
+            @Param("status") ChannelCredential.CredentialStatus status);
+
+    /**
+     * Find credential by metadata (used for OAuth state validation)
+     */
+    @Query("SELECT c FROM ChannelCredential c WHERE c.metadataJson LIKE %:searchString%")
+    Optional<ChannelCredential> findByMetadataContaining(@Param("searchString") String searchString);
+
+
+    /**
+     * Check if platform is already connected for business
+     */
+    boolean existsByBusinessIdAndPlatformType(Long businessId, ChannelCredential.PlatformType platformType);
+
+}
