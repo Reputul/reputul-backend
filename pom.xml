@@ -221,6 +221,19 @@
 					</excludes>
 				</configuration>
 			</plugin>
+			<plugin>
+				<groupId>org.flywaydb</groupId>
+				<artifactId>flyway-maven-plugin</artifactId>
+				<version>10.10.0</version>
+				<configuration>
+					<url>jdbc:postgresql://localhost:5432/reputul</url>
+					<user>rjculley</user>
+					<password>Cheese1612!</password>
+					<locations>
+						<location>filesystem:src/main/resources/db/migration</location>
+					</locations>
+				</configuration>
+			</plugin>
 
 			<!-- CRITICAL: Maven compiler plugin with Lombok annotation processing -->
 			<plugin>
