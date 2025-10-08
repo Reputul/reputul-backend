@@ -1,6 +1,7 @@
 package com.reputul.backend.controllers;
 
 import com.reputul.backend.auth.JwtUtil;
+import com.reputul.backend.dto.ReviewDto;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.EmailTemplate;
 import com.reputul.backend.models.Review;
@@ -10,9 +11,11 @@ import com.reputul.backend.repositories.EmailTemplateRepository;
 import com.reputul.backend.repositories.ReviewRepository;
 import com.reputul.backend.repositories.UserRepository;
 import com.reputul.backend.services.ReputationService;
+import com.reputul.backend.util.ReviewMapper;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -56,11 +59,24 @@ public class ReviewController {
                                           @RequestBody Review review,
                                           @AuthenticationPrincipal UserDetails userDetails) {
         try {
+            // CHANGE: Added tenant scoping check
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
             Business business = businessRepo.findById(businessId)
                     .orElse(null);
 
             if (business == null) {
                 return ResponseEntity.notFound().build();
+            }
+
+            // CHANGE: Verify the user owns this business
+            if (!business.getUser().getId().equals(user.getId())) {
+                log.warn("⚠️ User {} attempted to create review for business {} they don't own",
+                        user.getEmail(), businessId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to create reviews for this business");
             }
 
             // Validate rating
@@ -76,6 +92,7 @@ public class ReviewController {
 
             return ResponseEntity.ok(savedReview);
         } catch (Exception e) {
+            log.error("Error creating review: ", e);
             return ResponseEntity.badRequest().body("Error creating review: " + e.getMessage());
         }
     }
@@ -101,7 +118,10 @@ public class ReviewController {
 
             // Verify the user owns this business
             if (!business.getUser().getId().equals(user.getId())) {
-                return ResponseEntity.status(403).body("You don't own this business");
+                log.warn("⚠️ User {} attempted to create manual review for business {} they don't own",
+                        user.getEmail(), businessId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to add reviews for this business");
             }
 
             // Validate rating
@@ -118,28 +138,87 @@ public class ReviewController {
 
             return ResponseEntity.ok(savedReview);
         } catch (Exception e) {
+            log.error("Error adding manual review: ", e);
             return ResponseEntity.badRequest().body("Error adding manual review: " + e.getMessage());
         }
     }
 
-    // ✅ All reviews for a specific business (with sorting)
     @GetMapping("/business/{businessId}")
-    public List<Review> getReviewsByBusiness(
+    public ResponseEntity<?> getReviewsByBusiness(
             @PathVariable Long businessId,
             @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @AuthenticationPrincipal UserDetails userDetails
     ) {
-        Sort.Direction direction = sortDir.equalsIgnoreCase("asc") ?
-                Sort.Direction.ASC : Sort.Direction.DESC;
-        Sort sort = Sort.by(direction, sortBy);
+        try {
+            // Get current user for tenant scoping
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
-        return reviewRepo.findByBusinessIdOrderBy(businessId, sort);
+            // Get business and verify it exists
+            Business business = businessRepo.findById(businessId)
+                    .orElse(null);
+
+            if (business == null) {
+                log.warn("⚠️ Business {} not found", businessId);
+                return ResponseEntity.notFound().build();
+            }
+
+            // CRITICAL - Verify tenant scoping (user owns this business)
+            if (!business.getUser().getId().equals(user.getId())) {
+                log.warn("⚠️ SECURITY: User {} attempted to access reviews for business {} they don't own",
+                        email, businessId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to access reviews for this business");
+            }
+
+            // Only fetch reviews if authorization passed
+            Sort.Direction direction = sortDir.equalsIgnoreCase("asc") ?
+                    Sort.Direction.ASC : Sort.Direction.DESC;
+            Sort sort = Sort.by(direction, sortBy);
+
+            List<Review> reviews = reviewRepo.findByBusinessIdOrderBy(businessId, sort);
+
+            List<ReviewDto> reviewDTOs = ReviewMapper.toDTOList(reviews);
+
+            log.info("✅ User {} accessed {} reviews for business {}", email, reviewDTOs.size(), businessId);
+
+            return ResponseEntity.ok(reviewDTOs);
+
+        } catch (RuntimeException e) {
+            log.error("Error fetching reviews: ", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error fetching reviews: " + e.getMessage());
+        }
     }
 
-    // ✅ All reviews (admin/debug)
+    // Added tenant scoping - only admin or for debugging
     @GetMapping
-    public List<Review> getAllReviews() {
-        return reviewRepo.findAll();
+    public ResponseEntity<?> getAllReviews(@AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // Only return reviews for businesses owned by this user
+            List<Business> userBusinesses = businessRepo.findByUserId(user.getId());
+            List<Long> businessIds = userBusinesses.stream()
+                    .map(Business::getId)
+                    .toList();
+
+            List<Review> reviews = reviewRepo.findAll().stream()
+                    .filter(review -> businessIds.contains(review.getBusiness().getId()))
+                    .toList();
+
+            log.info("✅ User {} accessed {} total reviews across their businesses", user.getEmail(), reviews.size());
+            return ResponseEntity.ok(reviews);
+
+        } catch (RuntimeException e) {
+            log.error("Error fetching all reviews: ", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error fetching reviews: " + e.getMessage());
+        }
     }
 
     // ✅ Delete a review (business owner only)
@@ -162,7 +241,10 @@ public class ReviewController {
 
             // Check if user owns the business this review belongs to
             if (!review.getBusiness().getUser().getId().equals(user.getId())) {
-                return ResponseEntity.status(403).body("You don't have permission to delete this review");
+                log.warn("⚠️ User {} attempted to delete review {} for business they don't own",
+                        user.getEmail(), reviewId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("You don't have permission to delete this review");
             }
 
             Long businessId = review.getBusiness().getId();
@@ -171,8 +253,10 @@ public class ReviewController {
             // Update reputation after deletion
             reputationService.updateBusinessReputationAndBadge(businessId);
 
+            log.info("✅ User {} deleted review {} for business {}", user.getEmail(), reviewId, businessId);
             return ResponseEntity.ok("Review deleted successfully");
         } catch (Exception e) {
+            log.error("Error deleting review: ", e);
             return ResponseEntity.badRequest().body("Error deleting review: " + e.getMessage());
         }
     }
