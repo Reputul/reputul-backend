@@ -1,5 +1,6 @@
 package com.reputul.backend.controllers;
 
+import com.reputul.backend.dto.BusinessDto;
 import com.reputul.backend.dto.BusinessResponseDto;
 import com.reputul.backend.dto.ReviewSummaryDto;
 import com.reputul.backend.models.Business;
@@ -9,6 +10,7 @@ import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.ReviewRepository;
 import com.reputul.backend.repositories.UserRepository;
 import com.reputul.backend.services.BusinessService;
+import com.reputul.backend.util.BusinessMapper;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -22,6 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/businesses")
@@ -31,6 +34,7 @@ public class BusinessController {
     private final BusinessService businessService;
     private final UserRepository userRepo;
     private final ReviewRepository reviewRepo;
+
     private static final List<String> ALLOWED_CONTENT_TYPES = Arrays.asList(
             "image/jpeg",
             "image/jpg",
@@ -40,8 +44,8 @@ public class BusinessController {
     );
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-
-    public BusinessController(BusinessRepository businessRepo, BusinessService businessService, UserRepository userRepo, ReviewRepository reviewRepo) {
+    public BusinessController(BusinessRepository businessRepo, BusinessService businessService,
+                              UserRepository userRepo, ReviewRepository reviewRepo) {
         this.businessRepo = businessRepo;
         this.businessService = businessService;
         this.userRepo = userRepo;
@@ -49,14 +53,20 @@ public class BusinessController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Business>> getAll(@AuthenticationPrincipal UserDetails userDetails) {
+    public ResponseEntity<List<BusinessDto>> getAll(@AuthenticationPrincipal UserDetails userDetails) {
         try {
             String email = userDetails.getUsername();
             User user = userRepo.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
             List<Business> businesses = businessRepo.findByUserId(user.getId());
-            return ResponseEntity.ok(businesses);
+
+            // Convert to DTOs
+            List<BusinessDto> dtos = businesses.stream()
+                    .map(BusinessMapper::toDto)
+                    .collect(Collectors.toList());
+
+            return ResponseEntity.ok(dtos);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
@@ -75,16 +85,23 @@ public class BusinessController {
             business.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
             Business savedBusiness = businessRepo.save(business);
 
-            return ResponseEntity.ok(savedBusiness);
+            // Return DTO instead of entity
+            return ResponseEntity.ok(BusinessMapper.toDto(savedBusiness));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error creating business: " + e.getMessage());
+                    .body(Map.of("error", "Error creating business: " + e.getMessage()));
         }
     }
 
     @GetMapping("/user/{userId}")
-    public List<Business> getByUser(@PathVariable Long userId) {
-        return businessRepo.findByUserId(userId);
+    public ResponseEntity<List<BusinessDto>> getByUser(@PathVariable Long userId) {
+        List<Business> businesses = businessRepo.findByUserId(userId);
+
+        List<BusinessDto> dtos = businesses.stream()
+                .map(BusinessMapper::toDto)
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(dtos);
     }
 
     @GetMapping("/{id}")
@@ -100,8 +117,6 @@ public class BusinessController {
                             .address(business.getAddress())
                             .reputationScore(business.getReputationScore())
                             .badge(business.getBadge())
-                            // FIXED: Use efficient count query instead of loading entire reviews collection
-                            // This prevents LazyInitializationException and improves performance
                             .reviewCount((int) reviewRepo.countByBusinessId(business.getId()))
                             .reviewPlatformsConfigured(business.getReviewPlatformsConfigured())
                             .build();
@@ -151,7 +166,7 @@ public class BusinessController {
             // Check ownership
             if (!biz.getUser().getId().equals(user.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body("You don't have permission to update this business");
+                        .body(Map.of("error", "You don't have permission to update this business"));
             }
 
             // Update business fields
@@ -162,10 +177,12 @@ public class BusinessController {
             biz.setAddress(updatedBusiness.getAddress());
 
             businessRepo.save(biz);
-            return ResponseEntity.ok(biz);
+
+            // Return DTO
+            return ResponseEntity.ok(BusinessMapper.toDto(biz));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error updating business: " + e.getMessage());
+                    .body(Map.of("error", "Error updating business: " + e.getMessage()));
         }
     }
 
@@ -188,22 +205,17 @@ public class BusinessController {
             // Check ownership
             if (!business.getUser().getId().equals(user.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body("You don't have permission to delete this business");
+                        .body(Map.of("error", "You don't have permission to delete this business"));
             }
 
             businessRepo.delete(business);
-            Map<String, String> response = new HashMap<>();
-            response.put("message", "Business deleted successfully");
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(Map.of("message", "Business deleted successfully"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error deleting business: " + e.getMessage());
+                    .body(Map.of("error", "Error deleting business: " + e.getMessage()));
         }
     }
 
-    /**
-     * Upload business logo
-     */
     @PostMapping(value = "/{id}/logo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadBusinessLogo(
             @PathVariable Long id,
@@ -211,29 +223,26 @@ public class BusinessController {
             Authentication authentication) {
 
         try {
-            // Validate file
             if (file.isEmpty()) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "File is empty"));
             }
 
-            // Validate file size
             if (file.getSize() > MAX_FILE_SIZE) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "File size exceeds 5MB limit"));
             }
 
-            // Validate content type
             String contentType = file.getContentType();
             if (!ALLOWED_CONTENT_TYPES.contains(contentType)) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Invalid file type. Allowed: JPG, PNG, SVG, WebP"));
             }
 
-            // Update logo
             Business business = businessService.updateLogo(id, file, authentication);
 
-            return ResponseEntity.ok(business);
+            // Return DTO
+            return ResponseEntity.ok(BusinessMapper.toDto(business));
 
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
@@ -244,9 +253,6 @@ public class BusinessController {
         }
     }
 
-    /**
-     * Delete business logo
-     */
     @DeleteMapping("/{id}/logo")
     public ResponseEntity<?> deleteBusinessLogo(
             @PathVariable Long id,
@@ -260,9 +266,6 @@ public class BusinessController {
         }
     }
 
-    /**
-     * Get review platform configuration for a business
-     */
     @GetMapping("/{id}/review-platforms")
     public ResponseEntity<?> getReviewPlatforms(
             @PathVariable Long id,
@@ -278,7 +281,7 @@ public class BusinessController {
             // Verify ownership
             if (!business.getUser().getId().equals(user.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body("You don't have permission to access this business");
+                        .body(Map.of("error", "You don't have permission to access this business"));
             }
 
             Map<String, String> platforms = Map.of(
@@ -290,13 +293,10 @@ public class BusinessController {
             return ResponseEntity.ok(platforms);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error fetching review platforms: " + e.getMessage());
+                    .body(Map.of("error", "Error fetching review platforms: " + e.getMessage()));
         }
     }
 
-    /**
-     * Update review platform configuration for a business
-     */
     @PutMapping("/{id}/review-platforms")
     public ResponseEntity<?> updateReviewPlatforms(
             @PathVariable Long id,
@@ -313,7 +313,7 @@ public class BusinessController {
             // Verify ownership
             if (!business.getUser().getId().equals(user.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body("You don't have permission to update this business");
+                        .body(Map.of("error", "You don't have permission to update this business"));
             }
 
             // Update platform URLs
@@ -337,7 +337,7 @@ public class BusinessController {
             ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error updating review platforms: " + e.getMessage());
+                    .body(Map.of("error", "Error updating review platforms: " + e.getMessage()));
         }
     }
 }
