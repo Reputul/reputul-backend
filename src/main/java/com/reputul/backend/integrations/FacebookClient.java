@@ -220,10 +220,13 @@ public class FacebookClient implements PlatformReviewClient {
     private List<Map<String, Object>> getUserPages(String userAccessToken)
             throws PlatformIntegrationException {
 
+        // Step 1: Try normal /me/accounts (works for app-level permissions)
         String pagesUrl = String.format(
                 "%s/me/accounts?fields=id,name,access_token,category&access_token=%s",
                 GRAPH_API_URL, userAccessToken
         );
+
+        log.info("Calling Facebook /me/accounts endpoint");
 
         ResponseEntity<Map> response = restTemplate.getForEntity(pagesUrl, Map.class);
 
@@ -231,7 +234,120 @@ public class FacebookClient implements PlatformReviewClient {
             throw new PlatformIntegrationException("Failed to fetch Facebook pages");
         }
 
-        return (List<Map<String, Object>>) response.getBody().get("data");
+        log.info("Facebook /me/accounts response: {}", response.getBody());
+
+        List<Map<String, Object>> pages = (List<Map<String, Object>>) response.getBody().get("data");
+
+        // Step 2: If empty, extract page IDs from token granular scopes
+        if (pages == null || pages.isEmpty()) {
+            log.warn("No pages from /me/accounts (likely granular permissions). Extracting page IDs from token...");
+            pages = getPagesByIntrospectingToken(userAccessToken);
+        }
+
+        if (pages != null && !pages.isEmpty()) {
+            log.info("Found {} Facebook pages", pages.size());
+            for (Map<String, Object> page : pages) {
+                log.info("  - Page: {} (ID: {})", page.get("name"), page.get("id"));
+            }
+        } else {
+            log.warn("Facebook returned no accessible pages");
+        }
+
+        return pages;
+    }
+
+    /**
+     * Extract page IDs from token's granular scopes when /me/accounts fails
+     * This works for ANY user with granular (page-specific) permissions
+     */
+    private List<Map<String, Object>> getPagesByIntrospectingToken(String userAccessToken) {
+        try {
+            // Step 1: Introspect the token to get granular scopes
+            String debugUrl = String.format(
+                    "%s/debug_token?input_token=%s&access_token=%s|%s",
+                    GRAPH_API_URL, userAccessToken, appId, appSecret
+            );
+
+            log.info("Introspecting token to find page IDs from granular scopes");
+            ResponseEntity<Map> debugResponse = restTemplate.getForEntity(debugUrl, Map.class);
+
+            if (!debugResponse.getStatusCode().is2xxSuccessful() || debugResponse.getBody() == null) {
+                log.warn("Token introspection failed");
+                return null;
+            }
+
+            Map<String, Object> data = (Map<String, Object>) debugResponse.getBody().get("data");
+            List<Map<String, Object>> granularScopes = (List<Map<String, Object>>) data.get("granular_scopes");
+
+            if (granularScopes == null || granularScopes.isEmpty()) {
+                log.warn("No granular scopes found in token");
+                return null;
+            }
+
+            log.info("Found granular scopes: {}", granularScopes);
+
+            // Step 2: Extract unique page IDs from granular scopes
+            Set<String> pageIds = new HashSet<>();
+            for (Map<String, Object> scope : granularScopes) {
+                List<String> targetIds = (List<String>) scope.get("target_ids");
+                if (targetIds != null) {
+                    pageIds.addAll(targetIds);
+                }
+            }
+
+            if (pageIds.isEmpty()) {
+                log.warn("No page IDs found in granular scopes");
+                return null;
+            }
+
+            log.info("Extracted page IDs from token: {}", pageIds);
+
+            // Step 3: Fetch page details for each ID
+            List<Map<String, Object>> pages = new ArrayList<>();
+            for (String pageId : pageIds) {
+                try {
+                    Map<String, Object> pageData = getPageAccessToken(pageId, userAccessToken);
+                    if (pageData != null) {
+                        pages.add(pageData);
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to get access token for page {}: {}", pageId, e.getMessage());
+                }
+            }
+
+            return pages.isEmpty() ? null : pages;
+
+        } catch (Exception e) {
+            log.error("Failed to extract pages from token introspection", e);
+            return null;
+        }
+    }
+
+    /**
+     * Get page access token for a specific page ID
+     * This is used when we have granular permissions
+     */
+    private Map<String, Object> getPageAccessToken(String pageId, String userAccessToken) {
+        try {
+            // Get page details including its access token
+            String pageUrl = String.format(
+                    "%s/%s?fields=id,name,access_token,category&access_token=%s",
+                    GRAPH_API_URL, pageId, userAccessToken
+            );
+
+            log.info("Fetching page access token for page: {}", pageId);
+            ResponseEntity<Map> pageResponse = restTemplate.getForEntity(pageUrl, Map.class);
+
+            if (pageResponse.getStatusCode().is2xxSuccessful() && pageResponse.getBody() != null) {
+                log.info("Successfully retrieved access token for page {}", pageId);
+                return pageResponse.getBody();
+            }
+
+        } catch (Exception e) {
+            log.error("Failed to get page access token for {}: {}", pageId, e.getMessage());
+        }
+
+        return null;
     }
 
     /**
@@ -335,9 +451,10 @@ public class FacebookClient implements PlatformReviewClient {
         if (timestamp == null) return OffsetDateTime.now(ZoneOffset.UTC);
 
         try {
-            // Facebook returns ISO 8601 format: "2024-01-15T10:30:00+0000"
-            Instant instant = Instant.parse(timestamp);
-            return OffsetDateTime.ofInstant(instant, ZoneOffset.UTC);
+            // Facebook returns format: "2024-01-15T10:30:00+0000"
+            // Need to convert +0000 to +00:00 for proper parsing
+            String normalizedTimestamp = timestamp.replaceAll("(\\+\\d{2})(\\d{2})$", "$1:$2");
+            return OffsetDateTime.parse(normalizedTimestamp);
         } catch (Exception e) {
             log.warn("Failed to parse Facebook timestamp: {}", timestamp);
             return OffsetDateTime.now(ZoneOffset.UTC);

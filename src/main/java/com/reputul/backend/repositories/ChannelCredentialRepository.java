@@ -23,12 +23,21 @@ public interface ChannelCredentialRepository extends JpaRepository<ChannelCreden
      */
     List<ChannelCredential> findByBusinessIdAndStatus(Long businessId, ChannelCredential.CredentialStatus status);
 
+    /**
+     * Find credentials by business and platform type
+     */
     Optional<ChannelCredential> findByBusinessIdAndPlatformType(Long businessId, ChannelCredential.PlatformType platformType);
 
     /**
      * Find credentials by organization
      */
     List<ChannelCredential> findByOrganizationId(Long organizationId);
+
+    /**
+     * ADDED: Find all credentials by status (for scheduled jobs)
+     * More efficient than findAll() + filter
+     */
+    List<ChannelCredential> findByStatus(ChannelCredential.CredentialStatus status);
 
     /**
      * Find active credentials due for sync
@@ -43,13 +52,22 @@ public interface ChannelCredentialRepository extends JpaRepository<ChannelCreden
     /**
      * Find credential by metadata (used for OAuth state validation)
      */
-    @Query("SELECT c FROM ChannelCredential c WHERE c.metadataJson LIKE %:searchString%")
+    @Query("SELECT c FROM ChannelCredential c WHERE c.metadataJson LIKE CONCAT('%', :searchString, '%')")
     Optional<ChannelCredential> findByMetadataContaining(@Param("searchString") String searchString);
-
 
     /**
      * Check if platform is already connected for business
      */
     boolean existsByBusinessIdAndPlatformType(Long businessId, ChannelCredential.PlatformType platformType);
 
+    /**
+     * ADDED: Find credentials with tokens expiring soon (for token refresh job)
+     * More efficient than findAll() + filter
+     */
+    @Query("SELECT c FROM ChannelCredential c WHERE c.status = :status " +
+            "AND c.tokenExpiresAt IS NOT NULL " +
+            "AND c.tokenExpiresAt < :expiryThreshold")
+    List<ChannelCredential> findByStatusAndTokenExpiresAtBefore(
+            @Param("status") ChannelCredential.CredentialStatus status,
+            @Param("expiryThreshold") OffsetDateTime expiryThreshold);
 }
