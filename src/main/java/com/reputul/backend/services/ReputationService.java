@@ -138,7 +138,7 @@ public class ReputationService {
         business.setReputationScore(compositeScore);
 
         // Update badge based on new Wilson Score
-        String newBadge = badgeService.determineEnhancedBadge(reputulRating, (int) reviewRepo.countByBusinessId(businessId));
+        String newBadge = badgeService.determineEnhancedBadge(reputulRating, Math.toIntExact(reviewRepo.countByBusinessId(businessId)));
         business.setBadge(newBadge);
 
         businessRepo.save(business);

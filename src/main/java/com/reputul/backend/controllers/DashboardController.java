@@ -54,7 +54,7 @@ public class DashboardController {
                 .address(b.getAddress())
                 .reputationScore(b.getReputationScore())
                 .badge(b.getBadge())
-                .reviewCount((int) reviewRepo.countByBusinessId(b.getId()))
+                .reviewCount(Math.toIntExact(reviewRepo.countByBusinessId(b.getId())))
                 .reviewPlatformsConfigured(b.getReviewPlatformsConfigured())
                 .build()
         ).toList();

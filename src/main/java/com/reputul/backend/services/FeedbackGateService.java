@@ -162,21 +162,4 @@ public class FeedbackGateService {
         return reviewRepository.existsByCustomerIdAndSource(customerId, "internal_feedback_gate");
     }
 
-    /**
-     * INTERNAL USE: Get rating for business intelligence (not for filtering)
-     * This helps businesses understand sentiment but doesn't restrict access
-     */
-    public String getCustomerSentimentForAnalytics(Long customerId) {
-        Optional<Review> gateReview = reviewRepository
-                .findTopByCustomerIdAndSourceOrderByCreatedAtDesc(customerId, "internal_feedback_gate");
-
-        if (gateReview.isPresent()) {
-            int rating = gateReview.get().getRating();
-            if (rating >= 4) return "POSITIVE";
-            if (rating == 3) return "NEUTRAL";
-            return "NEGATIVE";
-        }
-
-        return "UNKNOWN";
-    }
 }
