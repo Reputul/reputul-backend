@@ -117,7 +117,7 @@ public class BusinessController {
                             .address(business.getAddress())
                             .reputationScore(business.getReputationScore())
                             .badge(business.getBadge())
-                            .reviewCount((int) reviewRepo.countByBusinessId(business.getId()))
+                            .reviewCount(Math.toIntExact(reviewRepo.countByBusinessId(business.getId()))) // FIXED: Safe long to int conversion
                             .reviewPlatformsConfigured(business.getReviewPlatformsConfigured())
                             .build();
                     return ResponseEntity.ok(response);

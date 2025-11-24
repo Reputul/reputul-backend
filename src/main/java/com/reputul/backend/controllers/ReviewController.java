@@ -1,6 +1,7 @@
 package com.reputul.backend.controllers;
 
 import com.reputul.backend.auth.JwtUtil;
+import com.reputul.backend.dto.ReviewDto;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.EmailTemplate;
 import com.reputul.backend.models.Review;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/reviews")
@@ -99,9 +101,11 @@ public class ReviewController {
                 return ResponseEntity.notFound().build();
             }
 
-            // Verify the user owns this business
-            if (!business.getUser().getId().equals(user.getId())) {
-                return ResponseEntity.status(403).body("You don't own this business");
+            // FIXED: Verify organization-based access instead of just user ownership
+            if (!business.getOrganization().getId().equals(user.getOrganization().getId())) {
+                log.warn("User {} from organization {} attempted to access business {} from organization {}",
+                        user.getEmail(), user.getOrganization().getId(), businessId, business.getOrganization().getId());
+                return ResponseEntity.status(403).body("Access denied");
             }
 
             // Validate rating
@@ -122,18 +126,62 @@ public class ReviewController {
         }
     }
 
-    // ✅ All reviews for a specific business (with sorting)
+    // ✅ BEST FIX: All reviews for a specific business using DTO to avoid Hibernate issues
     @GetMapping("/business/{businessId}")
-    public List<Review> getReviewsByBusiness(
+    @Transactional // Keep transaction open for the query
+    public ResponseEntity<?> getReviewsByBusiness(
             @PathVariable Long businessId,
             @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @AuthenticationPrincipal UserDetails userDetails
     ) {
-        Sort.Direction direction = sortDir.equalsIgnoreCase("asc") ?
-                Sort.Direction.ASC : Sort.Direction.DESC;
-        Sort sort = Sort.by(direction, sortBy);
+        try {
+            // Authentication and authorization
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
-        return reviewRepo.findByBusinessIdOrderBy(businessId, sort);
+            // Verify business belongs to user's organization
+            Business business = businessRepo.findById(businessId)
+                    .orElse(null);
+
+            if (business == null) {
+                log.warn("Business {} not found", businessId);
+                return ResponseEntity.notFound().build();
+            }
+
+            // Check organization-based access
+            if (!business.getOrganization().getId().equals(user.getOrganization().getId())) {
+                log.warn("User {} from organization {} attempted to access reviews for business {} from organization {}",
+                        user.getEmail(), user.getOrganization().getId(), businessId, business.getOrganization().getId());
+                return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+            }
+
+            // Get reviews using organization-aware repository method
+            Sort sort = Sort.by(Sort.Direction.fromString(sortDir), sortBy);
+            List<Review> reviews = reviewRepo.findByBusinessIdAndOrganizationId(businessId, user.getOrganization().getId(), sort);
+
+            // Force initialization of business and organization relationships within the transaction
+            for (Review review : reviews) {
+                if (review.getBusiness() != null) {
+                    review.getBusiness().getName(); // Initialize business
+                    if (review.getBusiness().getOrganization() != null) {
+                        review.getBusiness().getOrganization().getName(); // Initialize organization
+                    }
+                }
+            }
+
+            // Convert to DTOs to avoid any serialization issues
+            List<ReviewDto> reviewDTOs = ReviewDto.fromEntities(reviews);
+
+            log.info("Successfully retrieved {} reviews for business {} (organization {})",
+                    reviewDTOs.size(), businessId, user.getOrganization().getId());
+
+            return ResponseEntity.ok(reviewDTOs);
+        } catch (Exception e) {
+            log.error("Error fetching reviews for business {}: {}", businessId, e.getMessage(), e);
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to fetch reviews: " + e.getMessage()));
+        }
     }
 
     // ✅ All reviews (admin/debug)
@@ -142,8 +190,9 @@ public class ReviewController {
         return reviewRepo.findAll();
     }
 
-    // ✅ Delete a review (business owner only)
+    // ✅ FIXED: Delete a review with organization-based access control
     @DeleteMapping("/{reviewId}")
+    @Transactional
     public ResponseEntity<?> deleteReview(
             @PathVariable Long reviewId,
             @AuthenticationPrincipal UserDetails userDetails
@@ -160,9 +209,11 @@ public class ReviewController {
             User user = userRepo.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
-            // Check if user owns the business this review belongs to
-            if (!review.getBusiness().getUser().getId().equals(user.getId())) {
-                return ResponseEntity.status(403).body("You don't have permission to delete this review");
+            // FIXED: Check organization-based access instead of just user ownership
+            if (!review.getBusiness().getOrganization().getId().equals(user.getOrganization().getId())) {
+                log.warn("User {} from organization {} attempted to delete review {} for business from organization {}",
+                        user.getEmail(), user.getOrganization().getId(), reviewId, review.getBusiness().getOrganization().getId());
+                return ResponseEntity.status(403).body("Access denied");
             }
 
             Long businessId = review.getBusiness().getId();
@@ -171,8 +222,12 @@ public class ReviewController {
             // Update reputation after deletion
             reputationService.updateBusinessReputationAndBadge(businessId);
 
+            log.info("Successfully deleted review {} for business {} (organization {})",
+                    reviewId, businessId, user.getOrganization().getId());
+
             return ResponseEntity.ok("Review deleted successfully");
         } catch (Exception e) {
+            log.error("Error deleting review {}: {}", reviewId, e.getMessage(), e);
             return ResponseEntity.badRequest().body("Error deleting review: " + e.getMessage());
         }
     }
