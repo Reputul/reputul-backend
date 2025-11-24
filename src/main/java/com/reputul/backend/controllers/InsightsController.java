@@ -190,13 +190,61 @@ public class InsightsController {
      * Format platform name for display
      */
     private String formatPlatformName(String source) {
+        if (source == null) return "Unknown";
+
         switch (source.toUpperCase()) {
-            case "GOOGLE": return "Google";
-            case "FACEBOOK": return "Facebook";
-            case "YELP": return "Yelp";
-            case "DIRECT": return "Direct";
-            case "WEBSITE": return "Website";
-            default: return source.charAt(0) + source.substring(1).toLowerCase();
+            case "GOOGLE":
+            case "GOOGLE_MY_BUSINESS":
+                return "Google";
+            case "FACEBOOK":
+                return "Facebook";
+            case "YELP":
+                return "Yelp";
+            case "DIRECT":
+                return "Direct";
+            case "WEBSITE":
+                return "Website";
+            case "MANUAL":
+                return "Manual";
+            case "INTERNAL_FEEDBACK_GATE":
+                return "Private Feedback";
+            case "PUBLIC":
+                return "Public";
+            case "SMS":
+                return "SMS";
+            case "EMAIL":
+                return "Email";
+            default:
+                // Handle other cases by capitalizing and replacing underscores
+                String formatted = source.toLowerCase().replace("_", " ");
+                return formatted.substring(0, 1).toUpperCase() + formatted.substring(1);
+        }
+    }
+
+    /**
+     * Get brand color for each platform - also updated to handle google_my_business
+     */
+    private String getPlatformColor(String platform) {
+        if (platform == null) return "#6B7280"; // Default gray
+
+        switch (platform.toUpperCase()) {
+            case "GOOGLE":
+            case "GOOGLE_MY_BUSINESS":
+                return "#34A853"; // Google Green
+            case "FACEBOOK":
+                return "#1877F2"; // Facebook Blue
+            case "YELP":
+                return "#FF1A1A"; // Yelp Red
+            case "DIRECT":
+                return "#10B981"; // Green
+            case "WEBSITE":
+                return "#8B5CF6"; // Purple
+            case "MANUAL":
+                return "#F59E0B"; // Amber
+            case "INTERNAL_FEEDBACK_GATE":
+                return "#6B7280"; // Gray
+            default:
+                return "#6B7280"; // Default gray for unknown platforms
         }
     }
 
@@ -309,20 +357,6 @@ public class InsightsController {
                 })
                 .sorted((a, b) -> Integer.compare((Integer) b.get("count"), (Integer) a.get("count")))
                 .collect(Collectors.toList());
-    }
-
-    /**
-     * Get brand color for each platform
-     */
-    private String getPlatformColor(String platform) {
-        switch (platform.toUpperCase()) {
-            case "GOOGLE": return "#4285F4";
-            case "FACEBOOK": return "#1877F2";
-            case "YELP": return "#FF1A1A";
-            case "DIRECT": return "#10B981";
-            case "WEBSITE": return "#8B5CF6";
-            default: return "#6B7280";
-        }
     }
 
     /**
