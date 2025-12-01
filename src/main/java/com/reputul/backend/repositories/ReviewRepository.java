@@ -123,6 +123,12 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
             @Param("businessId") Long businessId,
             @Param("organizationId") Long organizationId);
 
+    /**
+     * Find reviews by business ID with minimum rating filter
+     * Used by: WidgetService for filtering reviews in widgets
+     */
+    List<Review> findByBusinessIdAndRatingGreaterThanEqual(Long businessId, Integer minRating);
+
     // ================================================================
     // TIME-BASED QUERIES - Used by analytics and reputation calculations
     // ================================================================
