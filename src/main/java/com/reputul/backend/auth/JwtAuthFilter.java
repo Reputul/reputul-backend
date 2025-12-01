@@ -38,6 +38,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             "/api/reviews/public/",
             "/api/customers/",
             "/api/waitlist/",
+            "/api/public/widgets/**",
             "/api/review-requests/send-direct",
             // CRITICAL: Webhook paths must be public for external services
             "/api/billing/webhook/",  // Stripe webhooks
