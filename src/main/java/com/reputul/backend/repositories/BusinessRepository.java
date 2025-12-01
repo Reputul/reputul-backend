@@ -75,6 +75,9 @@ public interface BusinessRepository extends JpaRepository<Business, Long> {
     @Query("SELECT COUNT(b) FROM Business b WHERE b.user = :user AND b.reviewPlatformsConfigured = :configured")
     long countByUserAndReviewPlatformsConfigured(@Param("user") User user, @Param("configured") boolean configured);
 
+    @Query("SELECT b FROM Business b WHERE b.id = :id AND b.organization.id = :organizationId")
+    Optional<Business> findByIdAndOrganizationId(@Param("id") Long id, @Param("organizationId") Long organizationId);
+
     /**
      * Find businesses by industry (case insensitive)
      */
