@@ -48,13 +48,9 @@ public class ReviewRequestController {
 
             log.info("🚀 Sending {} review request to customer ID: {}", deliveryMethod, customerId);
 
-            // Validate customer and get customer details for phone validation
-            Customer customer = customerRepository.findById(customerId)
-                    .orElseThrow(() -> new RuntimeException("Customer not found"));
-
-            if (!customer.getBusiness().getUser().getId().equals(user.getId())) {
-                throw new RuntimeException("Access denied: Customer does not belong to your business");
-            }
+            // Use repository method that validates ownership and eagerly fetches business
+            Customer customer = customerRepository.findByIdAndBusinessUser(customerId, user)
+                    .orElseThrow(() -> new RuntimeException("Customer not found or access denied"));
 
             // Validate delivery method requirements
             if ("SMS".equals(deliveryMethod)) {
@@ -132,13 +128,82 @@ public class ReviewRequestController {
         try {
             User user = getCurrentUser(authentication);
 
-            // Extract data that the frontend actually sends
-            Long businessId = Long.valueOf(request.get("selectedBusiness").toString());
-            String customerEmail = request.get("customerEmail").toString();
-            String customerName = request.get("customerName").toString();
-            String message = request.getOrDefault("message", "").toString();
+            // FIXED: Accept both "businessId" and "selectedBusiness" for backward compatibility
+            Long businessId = null;
+            if (request.get("businessId") != null) {
+                businessId = Long.valueOf(request.get("businessId").toString());
+            } else if (request.get("selectedBusiness") != null) {
+                businessId = Long.valueOf(request.get("selectedBusiness").toString());
+            }
 
-            log.info("🚀 Sending direct review request to: {} for business: {}", customerEmail, businessId);
+            // Extract customer info
+            String customerEmail = request.get("customerEmail") != null ? request.get("customerEmail").toString() : null;
+            String customerPhone = request.get("customerPhone") != null ? request.get("customerPhone").toString() : null;
+            String customerName = request.get("customerName") != null ? request.get("customerName").toString() : "Valued Customer";
+            String message = request.getOrDefault("message", "").toString();
+            String deliveryMethod = request.getOrDefault("deliveryMethod", "EMAIL").toString().toUpperCase();
+
+            // If customerId is provided, use that customer directly
+            Long customerId = null;
+            if (request.get("customerId") != null) {
+                customerId = Long.valueOf(request.get("customerId").toString());
+            }
+
+            log.info("🚀 Sending direct {} review request to: {} (customerId: {}, businessId: {})",
+                    deliveryMethod,
+                    "EMAIL".equals(deliveryMethod) ? customerEmail : customerPhone,
+                    customerId,
+                    businessId);
+
+            // If we have a customerId, send to that customer
+            if (customerId != null) {
+                // Use repository method that eagerly fetches business and user to avoid LazyInitializationException
+                Customer customer = customerRepository.findByIdAndBusinessUser(customerId, user)
+                        .orElseThrow(() -> new RuntimeException("Customer not found or access denied"));
+
+                // Send based on delivery method
+                if ("SMS".equals(deliveryMethod)) {
+                    if (customer.getPhone() == null || customer.getPhone().trim().isEmpty()) {
+                        return ResponseEntity.ok(Map.of(
+                                "status", "FAILED",
+                                "errorMessage", "Customer phone number is required for SMS delivery"
+                        ));
+                    }
+                    reviewRequestService.sendSmsReviewRequest(user, customerId);
+                } else {
+                    reviewRequestService.sendReviewRequestWithDefaultTemplate(user, customerId);
+                }
+
+                return ResponseEntity.ok(Map.of(
+                        "status", "SENT",
+                        "deliveryMethod", deliveryMethod,
+                        "message", deliveryMethod + " review request sent successfully!",
+                        "recipient", "SMS".equals(deliveryMethod) ? customer.getPhone() : customer.getEmail()
+                ));
+            }
+
+            // If no customerId, we need businessId for direct send
+            if (businessId == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "FAILED",
+                        "errorMessage", "Business ID is required for direct review requests"
+                ));
+            }
+
+            // Validate delivery requirements
+            if ("EMAIL".equals(deliveryMethod) && (customerEmail == null || customerEmail.trim().isEmpty())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "FAILED",
+                        "errorMessage", "Customer email is required for email delivery"
+                ));
+            }
+
+            if ("SMS".equals(deliveryMethod) && (customerPhone == null || customerPhone.trim().isEmpty())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "FAILED",
+                        "errorMessage", "Customer phone number is required for SMS delivery"
+                ));
+            }
 
             // Get the actual business and validate it belongs to the user
             Business business = businessRepository.findById(businessId)
@@ -148,11 +213,7 @@ public class ReviewRequestController {
                 throw new RuntimeException("Access denied: Business does not belong to you");
             }
 
-            // Get the default email template (ID 1)
-            EmailTemplate template = emailTemplateRepository.findById(1L)
-                    .orElseThrow(() -> new RuntimeException("Default email template not found"));
-
-            // Use actual business data from your Business entity
+            // Use actual business data
             String businessName = business.getName() != null ? business.getName() : "Your Business";
             String businessPhone = business.getPhone() != null ? business.getPhone() : "";
             String businessWebsite = business.getWebsite() != null ? business.getWebsite() : "";
@@ -170,9 +231,45 @@ public class ReviewRequestController {
                     business.getFacebookPageUrl() + "/reviews" :
                     "https://www.facebook.com/search/top?q=" + businessName.replace(" ", "%20");
 
-            // Generate private feedback URL (placeholder for now)
+            // Generate private feedback URL
             String privateReviewUrl = baseUrl + "/feedback/" + businessId;
             String unsubscribeUrl = baseUrl + "/unsubscribe/" + businessId;
+
+            // Handle SMS delivery
+            if ("SMS".equals(deliveryMethod)) {
+                String feedbackGateUrl = baseUrl + "/feedback/" + businessId;
+
+                String smsMessage = String.format(
+                        "Hi %s! Thanks for choosing %s. We'd love your feedback: %s Reply STOP to opt out.",
+                        customerName,
+                        businessName,
+                        feedbackGateUrl
+                );
+
+                // Send SMS using sendTestSms (2 params)
+                SmsService.SmsResult result = smsService.sendTestSms(customerPhone, smsMessage);
+
+                if (result.isSuccess()) {
+                    log.info("✅ SMS review request sent successfully to {}", customerPhone);
+                    return ResponseEntity.ok(Map.of(
+                            "status", "SENT",
+                            "deliveryMethod", "SMS",
+                            "message", "SMS review request sent successfully!",
+                            "recipient", customerPhone
+                    ));
+                } else {
+                    log.error("❌ Failed to send SMS to {}: {}", customerPhone, result.getErrorMessage());
+                    return ResponseEntity.ok(Map.of(
+                            "status", "FAILED",
+                            "errorMessage", result.getErrorMessage() != null ? result.getErrorMessage() : "Failed to send SMS"
+                    ));
+                }
+            }
+
+            // Handle Email delivery
+            // Get the default email template (ID 1)
+            EmailTemplate template = emailTemplateRepository.findById(1L)
+                    .orElseThrow(() -> new RuntimeException("Default email template not found"));
 
             // Replace template variables with actual business data
             String emailBody = template.getBody()
@@ -195,7 +292,7 @@ public class ReviewRequestController {
 
             String subject = "Share Your Experience with " + businessName;
 
-            // Send the email using your existing method
+            // Send the email using sendTestEmail (3 params: to, subject, body)
             boolean sent = emailService.sendTestEmail(customerEmail, subject, emailBody);
 
             if (sent) {
@@ -227,9 +324,13 @@ public class ReviewRequestController {
 
     @GetMapping("")
     public ResponseEntity<List<ReviewRequestDto>> getAllReviewRequests(Authentication authentication) {
-        User user = getCurrentUser(authentication);
-        List<ReviewRequestDto> requests = reviewRequestService.getAllReviewRequestsByUser(user);
-        return ResponseEntity.ok(requests);
+        try {
+            User user = getCurrentUser(authentication);
+            List<ReviewRequestDto> requests = reviewRequestService.getAllReviewRequestsByUser(user);
+            return ResponseEntity.ok(requests);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().build();
+        }
     }
 
     @GetMapping("/business/{businessId}")

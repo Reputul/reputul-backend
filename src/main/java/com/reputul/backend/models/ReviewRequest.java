@@ -82,7 +82,7 @@ public class ReviewRequest {
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)  // FIXED: Added nullable = false to match DB
     private OffsetDateTime updatedAt;
 
     @Column(name = "error_message")
@@ -117,7 +117,9 @@ public class ReviewRequest {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        createdAt = now;
+        updatedAt = now;  // FIXED: Set updatedAt on create too
     }
 
     @PreUpdate

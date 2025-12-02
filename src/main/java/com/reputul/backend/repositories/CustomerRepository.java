@@ -175,4 +175,39 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
         return Optional.empty();
     }
+    // ----- Eager fetch queries for ownership validation -----
+    /**
+     * Find customer by ID with business and user eagerly fetched.
+     * Use this when you need to validate ownership or access business/user data.
+     */
+    @Query("SELECT c FROM Customer c " +
+            "JOIN FETCH c.business b " +
+            "JOIN FETCH b.user " +
+            "WHERE c.id = :id")
+    Optional<Customer> findByIdWithBusinessAndUser(@Param("id") Long id);
+
+    /**
+     * Find customer by ID and verify it belongs to the given user.
+     * Returns empty if customer doesn't exist OR doesn't belong to user.
+     */
+    @Query("SELECT c FROM Customer c " +
+            "JOIN FETCH c.business b " +
+            "WHERE c.id = :id AND b.user = :user")
+    Optional<Customer> findByIdAndBusinessUser(@Param("id") Long id, @Param("user") User user);
+
+    /**
+     * Find customer by email with business eagerly fetched.
+     */
+    @Query("SELECT c FROM Customer c " +
+            "JOIN FETCH c.business b " +
+            "WHERE c.email = :email")
+    Optional<Customer> findByEmailWithBusiness(@Param("email") String email);
+
+    /**
+     * Find customer by email and user (for ownership validation).
+     */
+    @Query("SELECT c FROM Customer c " +
+            "JOIN FETCH c.business b " +
+            "WHERE c.email = :email AND b.user = :user")
+    Optional<Customer> findByEmailAndBusinessUser(@Param("email") String email, @Param("user") User user);
 }

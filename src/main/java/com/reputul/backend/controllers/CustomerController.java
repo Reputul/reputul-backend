@@ -11,6 +11,7 @@ import com.reputul.backend.security.CurrentUser;
 import com.reputul.backend.services.AutomationTriggerService;
 import com.reputul.backend.services.CustomerService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -22,7 +23,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/customers")
 @RequiredArgsConstructor
-// REMOVED: @CrossOrigin(origins = "*") - this was causing the CORS conflict
+@Slf4j  // Added for logging
 public class CustomerController {
 
     private final CustomerService customerService;
@@ -61,10 +62,13 @@ public class CustomerController {
     }
 
     @PostMapping
-    public ResponseEntity<CustomerDto> createCustomer(
+    public ResponseEntity<?> createCustomer(
             @RequestBody CreateCustomerRequest request,
             Authentication authentication) {
         try {
+            log.info("📝 Creating customer: name={}, email={}, businessId={}",
+                    request.getName(), request.getEmail(), request.getBusinessId());
+
             User user = getCurrentUser(authentication);
             CustomerDto customerDto = customerService.createCustomer(user, request);
 
@@ -75,20 +79,26 @@ public class CustomerController {
                         .orElseThrow(() -> new RuntimeException("Customer not found after creation"));
 
                 automationTriggerService.onCustomerCreated(customer);
-                System.out.println("✅ Triggered automation workflows for customer: " + customer.getName());
+                log.info("✅ Triggered automation workflows for customer: {}", customer.getName());
             } catch (Exception e) {
-                System.err.println("❌ Failed to trigger automation for customer: " + e.getMessage());
+                log.error("❌ Failed to trigger automation for customer: {}", e.getMessage());
                 // Don't fail customer creation if automation fails
             }
 
             return ResponseEntity.ok(customerDto);
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().build();
+            log.error("❌ Error creating customer: {}", e.getMessage());
+            e.printStackTrace();
+            // FIXED: Return the actual error message instead of empty 400
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", e.getMessage(),
+                    "message", "Failed to create customer: " + e.getMessage()
+            ));
         }
     }
 
     @PutMapping("/{customerId}")
-    public ResponseEntity<CustomerDto> updateCustomer(
+    public ResponseEntity<?> updateCustomer(
             @PathVariable Long customerId,
             @RequestBody CreateCustomerRequest request,
             Authentication authentication) {
@@ -97,12 +107,16 @@ public class CustomerController {
             CustomerDto customer = customerService.updateCustomer(user, customerId, request);
             return ResponseEntity.ok(customer);
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().build();
+            log.error("❌ Error updating customer {}: {}", customerId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", e.getMessage(),
+                    "message", "Failed to update customer: " + e.getMessage()
+            ));
         }
     }
 
     @DeleteMapping("/{customerId}")
-    public ResponseEntity<Void> deleteCustomer(
+    public ResponseEntity<?> deleteCustomer(
             @PathVariable Long customerId,
             Authentication authentication) {
         try {
@@ -110,7 +124,11 @@ public class CustomerController {
             customerService.deleteCustomer(user, customerId);
             return ResponseEntity.ok().build();
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().build();
+            log.error("❌ Error deleting customer {}: {}", customerId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", e.getMessage(),
+                    "message", "Failed to delete customer: " + e.getMessage()
+            ));
         }
     }
 
