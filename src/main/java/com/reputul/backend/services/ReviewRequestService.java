@@ -568,12 +568,14 @@ public class ReviewRequestService {
         Business business = businessRepository.findByIdAndUserId(businessId, user.getId())
                 .orElseThrow(() -> new RuntimeException("Business not found or access denied"));
 
-        List<ReviewRequest> requests = reviewRequestRepository.findByBusinessIdOrderByCreatedAtDesc(businessId);
+        // Use JOIN FETCH query to prevent lazy loading
+        List<ReviewRequest> requests = reviewRequestRepository.findByBusinessIdWithRelations(businessId);
         return requests.stream().map(this::convertToDto).collect(Collectors.toList());
     }
 
     public List<ReviewRequestDto> getAllReviewRequestsByUser(User user) {
-        List<ReviewRequest> requests = reviewRequestRepository.findByOwnerId(user.getId());
+        // Use custom repository method with JOIN FETCH to avoid lazy loading issues
+        List<ReviewRequest> requests = reviewRequestRepository.findByOwnerIdWithRelations(user.getId());
         return requests.stream().map(this::convertToDto).collect(Collectors.toList());
     }
 

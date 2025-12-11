@@ -84,9 +84,9 @@ public class CampaignSequenceService {
             return defaultSequences.getFirst();
         }
 
-        // No default found - either throw exception or create/return a fallback
-        throw new EntityNotFoundException(
-                "No default campaign sequence found for organization: " + orgId);
+        // No default found - create one automatically
+        log.info("No default campaign sequence found for org {}. Creating default sequence.", orgId);
+        return createDefaultSequence(orgId);
     }
 
     /**

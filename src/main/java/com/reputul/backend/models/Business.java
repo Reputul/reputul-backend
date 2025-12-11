@@ -68,7 +68,36 @@ public class Business {
     private String badge;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+
+    // ===== Google Places Integration Fields =====
     private String googlePlaceId;
+
+    @Column(name = "google_review_url", length = 500)
+    private String googleReviewUrl; // Direct review URL: https://search.google.com/local/writereview?placeid=PLACE_ID
+
+    @Column(name = "google_review_short_url", length = 300)
+    private String googleReviewShortUrl; // User-provided g.page short URL: https://g.page/r/XXX/review
+
+    @Column(name = "google_search_url", length = 500)
+    private String googleSearchUrl; // Fallback search URL when Place ID unavailable
+
+    @Column(name = "google_place_name", length = 255)
+    private String googlePlaceName; // Business name from Google Places
+
+    @Column(name = "google_place_formatted_address", length = 500)
+    private String googlePlaceFormattedAddress; // Address from Google Places
+
+    @Column(name = "google_place_types", columnDefinition = "TEXT")
+    private String googlePlaceTypes; // Business types (comma-separated)
+
+    @Column(name = "google_place_last_synced")
+    private OffsetDateTime googlePlaceLastSynced; // Last sync with Google Places API
+
+    @Column(name = "google_place_auto_detected")
+    @Builder.Default
+    private Boolean googlePlaceAutoDetected = false; // TRUE if auto-detected, FALSE if manual
+
+    // ===== Other Review Platforms =====
     private String facebookPageUrl;
     private String yelpPageUrl;
 
@@ -162,5 +191,38 @@ public class Business {
         if (score >= 76) return "green";
         if (score >= 46) return "yellow";
         return "red";
+    }
+
+    // ===== NEW: Google Review URL helper methods =====
+
+    /**
+     * Get the best available Google review URL (priority: direct > short > search)
+     */
+    public String getBestGoogleReviewUrl() {
+        if (googleReviewUrl != null && !googleReviewUrl.trim().isEmpty()) {
+            return googleReviewUrl;
+        }
+        if (googleReviewShortUrl != null && !googleReviewShortUrl.trim().isEmpty()) {
+            return googleReviewShortUrl;
+        }
+        if (googleSearchUrl != null && !googleSearchUrl.trim().isEmpty()) {
+            return googleSearchUrl;
+        }
+        return null;
+    }
+
+    /**
+     * Check if business has any Google review URL configured
+     */
+    public boolean hasGoogleReviewUrl() {
+        return getBestGoogleReviewUrl() != null;
+    }
+
+    /**
+     * Check if Google Place ID needs refresh (older than 30 days)
+     */
+    public boolean needsGooglePlaceRefresh() {
+        if (googlePlaceLastSynced == null) return true;
+        return googlePlaceLastSynced.isBefore(OffsetDateTime.now().minusDays(30));
     }
 }

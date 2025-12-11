@@ -5,6 +5,7 @@ import com.reputul.backend.models.User;
 import com.reputul.backend.repositories.BusinessRepository;
 import com.reputul.backend.repositories.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
@@ -18,10 +19,14 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class BusinessService {
 
     @Autowired
     private FileStorageService fileStorageService;
+
+    @Autowired
+    private GooglePlacesService googlePlacesService; // ADDED: Google Places auto-detection
 
     @Value("${app.backend.url}")
     private String backendUrl;
@@ -61,10 +66,19 @@ public class BusinessService {
     }
 
     /**
-     * Create new business
+     * Create new business with Google Places auto-detection
+     *
+     * CHANGED: Now auto-detects Place ID and generates review URLs
      */
     public Business createBusiness(Business business) {
-        return businessRepository.save(business);
+        // Save business first to get ID
+        Business savedBusiness = businessRepository.save(business);
+
+        // ADDED: Auto-detect Google Place ID if not manually provided
+        autoDetectAndConfigureGooglePlaces(savedBusiness);
+
+        // Save again with Google Places data
+        return businessRepository.save(savedBusiness);
     }
 
     /**
@@ -84,9 +98,14 @@ public class BusinessService {
 
     /**
      * Update business
+     *
+     * CHANGED: Refreshes Google Places data if address changes
      */
     public Business updateBusiness(Long businessId, Business updatedBusiness, User user) {
         Business existingBusiness = getBusinessById(businessId, user);
+
+        // Check if address changed
+        boolean addressChanged = !isSameAddress(existingBusiness.getAddress(), updatedBusiness.getAddress());
 
         // Update fields
         existingBusiness.setName(updatedBusiness.getName());
@@ -95,28 +114,138 @@ public class BusinessService {
         existingBusiness.setWebsite(updatedBusiness.getWebsite());
         existingBusiness.setAddress(updatedBusiness.getAddress());
 
+        // ADDED: If address changed, re-detect Google Place ID
+        if (addressChanged && existingBusiness.getGooglePlaceAutoDetected()) {
+            autoDetectAndConfigureGooglePlaces(existingBusiness);
+        }
+
         return businessRepository.save(existingBusiness);
     }
 
     /**
+     * Helper to check if address changed
+     */
+    private boolean isSameAddress(String addr1, String addr2) {
+        if (addr1 == null && addr2 == null) return true;
+        if (addr1 == null || addr2 == null) return false;
+        return addr1.trim().equalsIgnoreCase(addr2.trim());
+    }
+
+    /**
      * Update review platform configuration
+     *
+     * CHANGED: Handles manual Google Place ID and g.page URL overrides
      */
     public Business updateReviewPlatforms(Long businessId, String googlePlaceId,
                                           String facebookPageUrl, String yelpPageUrl, User user) {
+        return updateReviewPlatforms(businessId, googlePlaceId, null, facebookPageUrl, yelpPageUrl, user);
+    }
+
+    /**
+     * Update review platform configuration with g.page short URL support
+     *
+     * NEW METHOD: Supports both Place ID and g.page short URL
+     */
+    public Business updateReviewPlatforms(Long businessId, String googlePlaceId, String googleShortUrl,
+                                          String facebookPageUrl, String yelpPageUrl, User user) {
         Business business = getBusinessById(businessId, user);
 
-        business.setGooglePlaceId(googlePlaceId);
+        // ADDED: Handle manual Place ID override
+        if (googlePlaceId != null && !googlePlaceId.trim().isEmpty()) {
+            // User manually provided Place ID
+            business.setGooglePlaceId(googlePlaceId);
+            business.setGoogleReviewUrl(googlePlacesService.generateReviewUrl(googlePlaceId));
+            business.setGooglePlaceAutoDetected(false); // Manually entered
+            business.setGooglePlaceLastSynced(OffsetDateTime.now());
+        }
+
+        // ADDED: Handle g.page short URL
+        if (googleShortUrl != null && !googleShortUrl.trim().isEmpty()) {
+            // User provided g.page/r/XXX/review URL
+            business.setGoogleReviewShortUrl(googleShortUrl);
+
+            // Try to extract identifier (not a real Place ID, but stored for reference)
+            String extractedId = googlePlacesService.extractPlaceIdFromGPageUrl(googleShortUrl);
+            if (extractedId != null && business.getGooglePlaceId() == null) {
+                // Only set if Place ID is not already set
+                business.setGooglePlaceId("gpage_" + extractedId); // Prefix to indicate it's from g.page
+            }
+        }
+
+        // ADDED: If neither provided, try auto-detection
+        if ((googlePlaceId == null || googlePlaceId.trim().isEmpty()) &&
+                (googleShortUrl == null || googleShortUrl.trim().isEmpty()) &&
+                business.getGooglePlaceId() == null) {
+            autoDetectAndConfigureGooglePlaces(business);
+        }
+
+        // Set other platforms
         business.setFacebookPageUrl(facebookPageUrl);
         business.setYelpPageUrl(yelpPageUrl);
 
         // Mark as configured if at least one platform is set
-        boolean isConfigured = (googlePlaceId != null && !googlePlaceId.trim().isEmpty()) ||
+        boolean isConfigured = (business.getGooglePlaceId() != null && !business.getGooglePlaceId().trim().isEmpty()) ||
+                (googleShortUrl != null && !googleShortUrl.trim().isEmpty()) ||
                 (facebookPageUrl != null && !facebookPageUrl.trim().isEmpty()) ||
                 (yelpPageUrl != null && !yelpPageUrl.trim().isEmpty());
 
         business.setReviewPlatformsConfigured(isConfigured);
 
         return businessRepository.save(business);
+    }
+
+    /**
+     * NEW METHOD: Auto-detect Google Place ID and configure URLs
+     *
+     * This is the core auto-detection logic following Reputul's recommended approach
+     */
+    private void autoDetectAndConfigureGooglePlaces(Business business) {
+        if (business == null || business.getName() == null || business.getAddress() == null) {
+            // Generate fallback search URL
+            if (business != null && business.getName() != null) {
+                business.setGoogleSearchUrl(googlePlacesService.generateSearchUrl(business));
+            }
+            return;
+        }
+
+        try {
+            // Call Google Places API
+            GooglePlacesService.PlacesLookupResult result = googlePlacesService.autoDetectPlaceId(business);
+
+            if (result != null && result.isSuccess()) {
+                // SUCCESS: Apply Place ID and generate review URL
+                googlePlacesService.applyPlacesDataToBusiness(business, result);
+                log.info("✅ Auto-detected Place ID for business: {} → {}",
+                        business.getName(), result.getPlaceId());
+            } else {
+                // FALLBACK: Generate search URL
+                business.setGoogleSearchUrl(googlePlacesService.generateSearchUrl(business));
+                log.info("⚠️ Could not auto-detect Place ID for business: {}, using search URL fallback",
+                        business.getName());
+            }
+        } catch (Exception e) {
+            // ERROR FALLBACK: Generate search URL
+            business.setGoogleSearchUrl(googlePlacesService.generateSearchUrl(business));
+            log.error("❌ Error auto-detecting Place ID for business: {}, using search URL fallback",
+                    business.getName(), e);
+        }
+    }
+
+    /**
+     * NEW METHOD: Manually refresh Google Places data
+     *
+     * Useful for businesses that want to re-sync with Google
+     */
+    public Business refreshGooglePlacesData(Long businessId, User user) {
+        Business business = getBusinessById(businessId, user);
+
+        // Only refresh if originally auto-detected (don't override manual entries)
+        if (business.getGooglePlaceAutoDetected() != null && business.getGooglePlaceAutoDetected()) {
+            autoDetectAndConfigureGooglePlaces(business);
+            return businessRepository.save(business);
+        }
+
+        return business;
     }
 
     /**
