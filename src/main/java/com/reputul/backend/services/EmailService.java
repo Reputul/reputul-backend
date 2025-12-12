@@ -1,83 +1,89 @@
 package com.reputul.backend.services;
 
-import com.sendgrid.*;
-import com.sendgrid.helpers.mail.Mail;
-import com.sendgrid.helpers.mail.objects.Content;
-import com.sendgrid.helpers.mail.objects.Email;
+import com.resend.Resend;
+import com.resend.core.exception.ResendException;
+import com.resend.services.emails.model.CreateEmailOptions;
+import com.resend.services.emails.model.CreateEmailResponse;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.EmailTemplate;
 import com.reputul.backend.models.Organization;
-import com.reputul.backend.models.ReviewRequest;
 import com.reputul.backend.models.Usage;
 import com.reputul.backend.repositories.ReviewRequestRepository;
 import com.reputul.backend.repositories.UsageRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.Base64;
-import java.util.UUID;
 
 /**
- * EmailService with SendGrid Integration
- * Tracking is configured via SendGrid Dashboard, not in code
+ * EmailService with Resend Integration
+ *
+ * Resend provides better deliverability and developer experience.
+ * https://resend.com
  */
 @Service
 @Slf4j
 public class EmailService {
 
-    private final SendGrid sendGrid;
+    private final Resend resend;
+    private final boolean enabled;
+
     private final EmailTemplateService emailTemplateService;
     private final ReviewRequestRepository reviewRequestRepository;
     private final UsageRepository usageRepository;
-    private final ObjectMapper objectMapper;
 
-    @Value("${sendgrid.from.email}")
+    @Value("${resend.from-email:reviews@reputul.com}")
     private String fromEmail;
 
-    @Value("${sendgrid.from.name}")
+    @Value("${resend.from-name:Reputul}")
     private String fromName;
 
-    @Value("${app.frontend.url}")
+    @Value("${app.frontend.url:http://localhost:3000}")
     private String frontendUrl;
 
-    @Value("${sendgrid.webhook.verification.key:}")
-    private String webhookVerificationKey;
+    public EmailService(
+            @Value("${resend.api-key:}") String apiKey,
+            @Value("${resend.enabled:true}") boolean enabledConfig,
+            EmailTemplateService emailTemplateService,
+            ReviewRequestRepository reviewRequestRepository,
+            UsageRepository usageRepository) {
 
-    @Value("${sendgrid.domain.verified:app.reputul.com}")
-    private String verifiedDomain;
-
-    public EmailService(@Value("${sendgrid.api.key}") String apiKey,
-                        EmailTemplateService emailTemplateService,
-                        ReviewRequestRepository reviewRequestRepository,
-                        UsageRepository usageRepository) {
-        log.info("Initializing EmailService with API key: {}...",
-                apiKey != null ? apiKey.substring(0, Math.min(10, apiKey.length())) : "null");
-        this.sendGrid = new SendGrid(apiKey);
         this.emailTemplateService = emailTemplateService;
         this.reviewRequestRepository = reviewRequestRepository;
         this.usageRepository = usageRepository;
-        this.objectMapper = new ObjectMapper();
+
+        // Initialize Resend
+        boolean hasValidKey = apiKey != null && !apiKey.isEmpty() && apiKey.startsWith("re_");
+        this.enabled = enabledConfig && hasValidKey;
+
+        if (this.enabled) {
+            this.resend = new Resend(apiKey);
+            log.info("✅ Resend email service initialized");
+            log.info("📧 From: {} <{}>", fromName, fromEmail);
+        } else {
+            this.resend = null;
+            if (!hasValidKey) {
+                log.warn("⚠️ Resend API key not configured or invalid - emails will not be sent");
+                log.warn("   Set RESEND_API_KEY environment variable with your Resend API key (starts with 're_')");
+            } else {
+                log.warn("⚠️ Resend is disabled via configuration");
+            }
+        }
     }
+
+    // ========================================================================
+    // MAIN PUBLIC METHODS - Used by ReviewRequestService and other services
+    // ========================================================================
 
     /**
      * GOOGLE COMPLIANT: Send review request using EmailTemplateService
      * Templates now always show ALL review options to ALL customers
-     * ENHANCED: Now tracks SendGrid message ID for webhook events
      */
     public boolean sendReviewRequestWithTemplate(Customer customer) {
-        log.info("Sending COMPLIANT review request with template to: {}", customer.getEmail());
+        log.info("Sending review request with template to: {}", customer.getEmail());
 
         try {
             Business business = customer.getBusiness();
@@ -94,25 +100,24 @@ public class EmailService {
             // Track email usage for billing
             trackEmailUsage(organization, "REVIEW_REQUEST");
 
-            // Send via SendGrid and capture message ID
-            SendGridResponse response = sendHtmlEmailWithTracking(
+            // Send via Resend
+            EmailResult result = sendHtmlEmail(
                     customer.getEmail(),
-                    customer.getName(),
                     subject,
                     htmlContent,
                     business.getName(),
                     organization.getId()
             );
 
-            // Store SendGrid message ID if we have a ReviewRequest to update
-            if (response.isSuccess() && response.getMessageId() != null) {
-                updateReviewRequestWithMessageId(customer, response.getMessageId());
+            // Store message ID for tracking
+            if (result.isSuccess() && result.getMessageId() != null) {
+                updateReviewRequestWithMessageId(customer, result.getMessageId());
             }
 
-            return response.isSuccess();
+            return result.isSuccess();
 
         } catch (Exception e) {
-            log.error("Failed to send compliant template-based review request to: {}", customer.getEmail(), e);
+            log.error("Failed to send template-based review request to: {}", customer.getEmail(), e);
             return false;
         }
     }
@@ -120,10 +125,9 @@ public class EmailService {
     /**
      * GOOGLE COMPLIANT: Send follow-up emails (3-day, 7-day)
      * All follow-ups show ALL review options
-     * ENHANCED: Now tracks SendGrid message ID
      */
     public boolean sendFollowUpEmail(Customer customer, EmailTemplate.TemplateType followUpType) {
-        log.info("Sending COMPLIANT {} follow-up email to: {}", followUpType, customer.getEmail());
+        log.info("Sending {} follow-up email to: {}", followUpType, customer.getEmail());
 
         try {
             Business business = customer.getBusiness();
@@ -136,32 +140,30 @@ public class EmailService {
             // Track email usage for billing
             trackEmailUsage(organization, "FOLLOW_UP");
 
-            // Send via SendGrid and capture message ID
-            SendGridResponse response = sendHtmlEmailWithTracking(
+            // Send via Resend
+            EmailResult result = sendHtmlEmail(
                     customer.getEmail(),
-                    customer.getName(),
                     subject,
                     htmlContent,
                     business.getName(),
                     organization.getId()
             );
 
-            // Store SendGrid message ID
-            if (response.isSuccess() && response.getMessageId() != null) {
-                updateReviewRequestWithMessageId(customer, response.getMessageId());
+            // Store message ID
+            if (result.isSuccess() && result.getMessageId() != null) {
+                updateReviewRequestWithMessageId(customer, result.getMessageId());
             }
 
-            return response.isSuccess();
+            return result.isSuccess();
 
         } catch (Exception e) {
-            log.error("Failed to send compliant follow-up email to: {}", customer.getEmail(), e);
+            log.error("Failed to send follow-up email to: {}", customer.getEmail(), e);
             return false;
         }
     }
 
     /**
      * GOOGLE COMPLIANT: Send thank you email
-     * ENHANCED: Now tracks SendGrid message ID
      */
     public boolean sendThankYouEmail(Customer customer) {
         log.info("Sending thank you email to: {}", customer.getEmail());
@@ -177,22 +179,21 @@ public class EmailService {
             // Track email usage for billing
             trackEmailUsage(organization, "THANK_YOU");
 
-            // Send via SendGrid and capture message ID
-            SendGridResponse response = sendHtmlEmailWithTracking(
+            // Send via Resend
+            EmailResult result = sendHtmlEmail(
                     customer.getEmail(),
-                    customer.getName(),
                     subject,
                     htmlContent,
                     business.getName(),
                     organization.getId()
             );
 
-            // Store SendGrid message ID
-            if (response.isSuccess() && response.getMessageId() != null) {
-                updateReviewRequestWithMessageId(customer, response.getMessageId());
+            // Store message ID
+            if (result.isSuccess() && result.getMessageId() != null) {
+                updateReviewRequestWithMessageId(customer, result.getMessageId());
             }
 
-            return response.isSuccess();
+            return result.isSuccess();
 
         } catch (Exception e) {
             log.error("Failed to send thank you email to: {}", customer.getEmail(), e);
@@ -201,131 +202,112 @@ public class EmailService {
     }
 
     /**
-     * UPDATED: Legacy method - now uses COMPLIANT EmailTemplateService processing
-     * ENHANCED: Now tracks SendGrid message ID
+     * Send password reset email
      */
-    public boolean sendReviewRequest(Customer customer, Business business, String subject, String body, String reviewLink) {
-        log.info("Attempting to send COMPLIANT review request to: {}", customer.getEmail());
-        log.info("From email: {}, From name: {}", fromEmail, business.getName());
+    public boolean sendPasswordResetEmail(String toEmail, String token) {
+        log.info("Sending password reset email to: {}", toEmail);
+
+        String resetLink = frontendUrl + "/reset-password?token=" + token;
+        String subject = "Reset Your Reputul Password";
+
+        String htmlContent = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5;">
+            <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f5; padding: 40px 20px;">
+                <tr>
+                    <td align="center">
+                        <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="max-width: 480px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                            <tr>
+                                <td style="padding: 32px 32px 24px; text-align: center; border-bottom: 1px solid #e4e4e7;">
+                                    <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #4F46E5;">Reputul</h1>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 32px;">
+                                    <h2 style="margin: 0 0 16px; font-size: 20px; font-weight: 600; color: #18181b;">Reset Your Password</h2>
+                                    <p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #52525b;">
+                                        We received a request to reset your password. Click the button below to choose a new password.
+                                    </p>
+                                    <a href="%s" style="display: inline-block; padding: 12px 24px; background-color: #4F46E5; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px;">
+                                        Reset Password
+                                    </a>
+                                    <p style="margin: 24px 0 0; font-size: 13px; color: #71717a;">
+                                        This link expires in 1 hour. If you didn't request this, you can safely ignore this email.
+                                    </p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 24px 32px; border-top: 1px solid #e4e4e7; text-align: center;">
+                                    <p style="margin: 0; font-size: 12px; color: #a1a1aa;">
+                                        © 2024 Reputul. All rights reserved.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </body>
+        </html>
+        """.formatted(resetLink);
+
+        EmailResult result = sendHtmlEmail(toEmail, subject, htmlContent, null, null);
+        return result.isSuccess();
+    }
+
+    /**
+     * Send review request (legacy method - for backward compatibility)
+     */
+    public boolean sendReviewRequest(Customer customer, Business business, String subject,
+                                     String processedBody, String reviewLink) {
+        log.info("Sending review request to: {}", customer.getEmail());
 
         try {
             Organization organization = business.getOrganization();
 
-            // Use COMPLIANT EmailTemplateService for better template processing
-            String processedBody = emailTemplateService.processTemplate(body, customer, business, reviewLink);
-            String processedSubject = emailTemplateService.processTemplate(subject, customer, business, reviewLink);
-
-            log.info("Processed subject: {}", processedSubject);
-            log.info("Processed body preview: {}...",
-                    processedBody.length() > 100 ? processedBody.substring(0, 100) : processedBody);
-
             // Track email usage for billing
-            trackEmailUsage(organization, "REVIEW_REQUEST_LEGACY");
+            trackEmailUsage(organization, "REVIEW_REQUEST");
 
-            // Send via SendGrid and capture message ID
-            SendGridResponse response = sendHtmlEmailWithTracking(
+            // Send via Resend
+            EmailResult result = sendHtmlEmail(
                     customer.getEmail(),
-                    customer.getName(),
-                    processedSubject,
+                    subject,
                     processedBody,
                     business.getName(),
                     organization.getId()
             );
 
-            // Store SendGrid message ID
-            if (response.isSuccess() && response.getMessageId() != null) {
-                updateReviewRequestWithMessageId(customer, response.getMessageId());
+            // Store message ID
+            if (result.isSuccess() && result.getMessageId() != null) {
+                updateReviewRequestWithMessageId(customer, result.getMessageId());
             }
 
-            return response.isSuccess();
+            return result.isSuccess();
 
         } catch (Exception e) {
-            log.error("❌ Error sending compliant review request to {}: {}", customer.getEmail(), e.getMessage(), e);
+            log.error("❌ Error sending review request to {}: {}", customer.getEmail(), e.getMessage(), e);
             return false;
         }
     }
 
     /**
-     * CORE METHOD: Send HTML email via SendGrid with tracking
-     * Returns SendGridResponse with success status and message ID
-     * SIMPLIFIED: No tracking classes needed - configured in SendGrid dashboard
-     */
-    private SendGridResponse sendHtmlEmailWithTracking(String toEmail, String toName, String subject,
-                                                       String htmlContent, String fromBusinessName, Long organizationId) {
-        try {
-            Email from = new Email(fromEmail, fromBusinessName != null ? fromBusinessName : fromName);
-            Email to = new Email(toEmail, toName);
-
-            // Ensure CAN-SPAM compliant content
-            String compliantHtmlContent = ensureCanSpamCompliance(htmlContent, organizationId);
-
-            Content content = new Content("text/html", compliantHtmlContent);
-            Mail mail = new Mail(from, subject, to, content);
-
-            // NOTE: Tracking is configured in SendGrid Dashboard, not in code
-            // Go to SendGrid Dashboard > Settings > Tracking to enable click and open tracking
-
-            // Add custom headers for internal tracking
-            String internalMessageId = UUID.randomUUID().toString();
-            mail.addHeader("X-Reputul-Message-Id", internalMessageId);
-            mail.addHeader("X-Reputul-Org-Id", organizationId != null ? organizationId.toString() : "system");
-
-            Request request = new Request();
-            request.setMethod(Method.POST);
-            request.setEndpoint("mail/send");
-            request.setBody(mail.build());
-
-            log.info("Sending COMPLIANT HTML email to SendGrid...");
-            Response response = sendGrid.api(request);
-
-            log.info("SendGrid Response - Status: {}", response.getStatusCode());
-            log.info("SendGrid Response - Body: {}", response.getBody());
-
-            // Extract SendGrid message ID from response
-            String sendgridMessageId = extractSendGridMessageId(response);
-
-            boolean success = response.getStatusCode() >= 200 && response.getStatusCode() < 300;
-
-            if (success) {
-                log.info("✅ COMPLIANT HTML email sent successfully to {} with SendGrid ID: {}",
-                        toEmail, sendgridMessageId);
-                return new SendGridResponse(true, sendgridMessageId);
-            } else {
-                log.error("❌ SendGrid failed with status {}: {}", response.getStatusCode(), response.getBody());
-                return new SendGridResponse(false, null);
-            }
-
-        } catch (IOException e) {
-            log.error("❌ IOException sending HTML email to {}: {}", toEmail, e.getMessage(), e);
-            return new SendGridResponse(false, null);
-        } catch (Exception e) {
-            log.error("❌ Unexpected error sending HTML email to {}: {}", toEmail, e.getMessage(), e);
-            return new SendGridResponse(false, null);
-        }
-    }
-
-    /**
-     * Backward compatibility wrapper for existing sendHtmlEmail calls
-     */
-    private boolean sendHtmlEmail(String toEmail, String toName, String subject, String htmlContent, String fromBusinessName) {
-        SendGridResponse response = sendHtmlEmailWithTracking(toEmail, toName, subject, htmlContent, fromBusinessName, null);
-        return response.isSuccess();
-    }
-
-    /**
-     * UPDATED: Test email with Google-compliant template
+     * Send a test email
      */
     public boolean sendTestEmail(String toEmail, String subject, String body) {
-        log.info("=== SENDGRID COMPLIANT TEST EMAIL ===");
+        log.info("=== SENDING TEST EMAIL ===");
         log.info("To: {}", toEmail);
-        log.info("From: {} ({})", fromEmail, fromName);
 
         try {
-            // If no custom body provided, use a compliant test template with all buttons
-            String testBody = (body != null && !body.trim().isEmpty()) ? body : createCompliantTestEmailBody();
-            String testSubject = (subject != null && !subject.trim().isEmpty()) ? subject : "Test Email - Google Compliant";
+            String testBody = (body != null && !body.trim().isEmpty()) ? body : createTestEmailBody();
+            String testSubject = (subject != null && !subject.trim().isEmpty()) ? subject : "Test Email from Reputul";
 
-            return sendHtmlEmail(toEmail, "", testSubject, testBody, fromName);
+            EmailResult result = sendHtmlEmail(toEmail, testSubject, testBody, "Reputul", null);
+            return result.isSuccess();
 
         } catch (Exception e) {
             log.error("❌ Error sending test email: {}", e.getMessage(), e);
@@ -334,286 +316,120 @@ public class EmailService {
     }
 
     /**
-     * GOOGLE COMPLIANT: Create a test email with ALL review options shown
-     */
-    private String createCompliantTestEmailBody() {
-        // ... (same as before, no changes needed)
-        return """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Google Compliant Test Email</title>
-            </head>
-            <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
-                <!-- ... full HTML template ... -->
-            </body>
-            </html>
-            """;
-    }
-
-    /**
-     * Helper method to get default template ID
-     */
-    private Long getDefaultTemplateId(Customer customer, EmailTemplate.TemplateType templateType) {
-        try {
-            return emailTemplateService.getDefaultTemplate(
-                    customer.getBusiness().getUser(),
-                    templateType
-            ).getId();
-        } catch (Exception e) {
-            log.error("Failed to get default template for type: {}", templateType, e);
-            throw new RuntimeException("No default template found for type: " + templateType);
-        }
-    }
-
-    /**
-     * GOOGLE COMPLIANT: Generate review link that goes to rating gate
+     * Generate review link for a business
      */
     public String generateReviewLink(Business business) {
-        return String.format("%s/feedback-gate/business/%d", frontendUrl, business.getId());
+        // If Google Place ID exists, use Google review link
+        if (business.getGooglePlaceId() != null && !business.getGooglePlaceId().isEmpty()) {
+            return "https://search.google.com/local/writereview?placeid=" + business.getGooglePlaceId();
+        }
+
+        // Otherwise, use internal feedback gate
+        return frontendUrl + "/feedback-gate/business/" + business.getId();
     }
 
+    // ========================================================================
+    // CORE SENDING METHOD
+    // ========================================================================
+
     /**
-     * Send password reset email
+     * Core method to send HTML email via Resend
      */
-    public boolean sendPasswordResetEmail(String toEmail, String resetToken) {
-        log.info("Sending password reset email to: {}", toEmail);
+    private EmailResult sendHtmlEmail(String toEmail, String subject, String htmlContent,
+                                      String fromBusinessName, Long organizationId) {
+
+        if (!enabled) {
+            log.warn("📧 Resend DISABLED - Would send to: {} | Subject: {}", toEmail, subject);
+            return new EmailResult(false, null, "Resend service is disabled - set RESEND_API_KEY");
+        }
+
+        if (toEmail == null || toEmail.trim().isEmpty()) {
+            log.error("❌ Cannot send email - recipient is empty");
+            return new EmailResult(false, null, "Recipient email is required");
+        }
+
+        if (subject == null || subject.trim().isEmpty()) {
+            log.error("❌ Cannot send email - subject is empty");
+            return new EmailResult(false, null, "Subject is required");
+        }
 
         try {
-            String resetUrl = frontendUrl + "/reset-password?token=" + resetToken;
-            String subject = "Reset Your Reputul Password";
-            String htmlContent = createPasswordResetEmailBody(resetUrl);
+            // Ensure CAN-SPAM compliance
+            String compliantHtmlContent = ensureCanSpamCompliance(htmlContent, organizationId);
 
-            return sendHtmlEmail(toEmail, "", subject, htmlContent, fromName);
+            // Build sender name
+            String senderName = fromBusinessName != null ? fromBusinessName + " via Reputul" : fromName;
+            String from = String.format("%s <%s>", senderName, fromEmail);
 
+            log.info("📧 Sending email via Resend:");
+            log.info("   From: {}", from);
+            log.info("   To: {}", toEmail);
+            log.info("   Subject: {}", subject);
+
+            CreateEmailOptions options = CreateEmailOptions.builder()
+                    .from(from)
+                    .to(toEmail)
+                    .subject(subject)
+                    .html(compliantHtmlContent)
+                    .build();
+
+            CreateEmailResponse response = resend.emails().send(options);
+            String messageId = response.getId();
+
+            log.info("✅ Email sent successfully via Resend - Message ID: {}", messageId);
+            return new EmailResult(true, messageId, null);
+
+        } catch (ResendException e) {
+            log.error("❌ Resend API error: {}", e.getMessage());
+            return new EmailResult(false, null, "Resend API error: " + e.getMessage());
         } catch (Exception e) {
-            log.error("❌ Failed to send password reset email to: {}", toEmail, e);
-            return false;
+            log.error("❌ Unexpected error sending email: {}", e.getMessage(), e);
+            return new EmailResult(false, null, "Unexpected error: " + e.getMessage());
+        }
+    }
+
+    // ========================================================================
+    // HELPER METHODS
+    // ========================================================================
+
+    /**
+     * Get default template ID for a customer and template type
+     */
+    private Long getDefaultTemplateId(Customer customer, EmailTemplate.TemplateType type) {
+        try {
+            return emailTemplateService.getDefaultTemplate(customer.getBusiness().getUser(), type).getId();
+        } catch (Exception e) {
+            log.warn("Could not get default template ID for type {}: {}", type, e.getMessage());
+            return null;
         }
     }
 
     /**
-     * Password reset email HTML template
+     * Update review request with message ID for tracking
+     * Uses existing repository method that filters by PENDING status
      */
-    private String createPasswordResetEmailBody(String resetUrl) {
-        // ... (same as before, no changes needed)
-        return String.format("""
-            <!DOCTYPE html>
-            <html>
-            <!-- ... full HTML template ... -->
-            </html>
-            """, resetUrl, resetUrl, resetUrl);
-    }
-
-    // ========== EMAIL EVENT TRACKING METHODS ==========
-
-    /**
-     * Extract SendGrid message ID from API response
-     */
-    private String extractSendGridMessageId(Response response) {
+    private void updateReviewRequestWithMessageId(Customer customer, String messageId) {
         try {
-            // First check headers
-            if (response.getHeaders() != null) {
-                String messageId = response.getHeaders().get("X-Message-Id");
-                if (messageId != null && !messageId.isEmpty()) {
-                    log.info("Extracted SendGrid Message ID from headers: {}", messageId);
-                    return messageId;
-                }
-            }
-
-            // Then try to parse from body
-            if (response.getBody() != null && !response.getBody().isEmpty()) {
-                JsonNode root = objectMapper.readTree(response.getBody());
-                if (root.has("message_id")) {
-                    String messageId = root.get("message_id").asText();
-                    log.info("Extracted SendGrid Message ID from body: {}", messageId);
-                    return messageId;
-                }
-            }
-
-            // Generate a fallback ID
-            String fallbackId = "sg_" + UUID.randomUUID().toString();
-            log.warn("Could not extract SendGrid Message ID, using fallback: {}", fallbackId);
-            return fallbackId;
-
-        } catch (Exception e) {
-            log.error("Error extracting SendGrid message ID: {}", e.getMessage());
-            String fallbackId = "sg_" + UUID.randomUUID().toString();
-            return fallbackId;
-        }
-    }
-
-    /**
-     * Update ReviewRequest with SendGrid message ID
-     */
-    private void updateReviewRequestWithMessageId(Customer customer, String sendgridMessageId) {
-        try {
-            // Find the most recent pending review request for this customer
-            ReviewRequest reviewRequest = reviewRequestRepository
-                    .findTopByCustomerAndStatusOrderByCreatedAtDesc(
-                            customer,
-                            ReviewRequest.RequestStatus.PENDING
-                    )
-                    .orElse(null);
-
-            if (reviewRequest != null) {
-                reviewRequest.setSendgridMessageId(sendgridMessageId);
-                reviewRequest.setEmailStatus("sent");
-                reviewRequest.setStatus(ReviewRequest.RequestStatus.SENT);
-                reviewRequest.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            reviewRequestRepository.findTopByCustomerAndStatusOrderByCreatedAtDesc(
+                    customer,
+                    com.reputul.backend.models.ReviewRequest.RequestStatus.PENDING
+            ).ifPresent(reviewRequest -> {
+                reviewRequest.setSendgridMessageId(messageId); // Reusing field name for any provider
                 reviewRequestRepository.save(reviewRequest);
-                log.info("Updated ReviewRequest {} with SendGrid message ID: {}",
-                        reviewRequest.getId(), sendgridMessageId);
-            } else {
-                log.warn("No pending ReviewRequest found for customer {} to update with message ID",
-                        customer.getId());
-            }
+                log.debug("Updated review request {} with message ID: {}",
+                        reviewRequest.getId(), messageId);
+            });
         } catch (Exception e) {
-            log.error("Failed to update ReviewRequest with SendGrid message ID: {}", e.getMessage());
+            log.warn("Could not update review request with message ID: {}", e.getMessage());
         }
     }
 
     /**
-     * Verify SendGrid webhook signature
-     */
-    public boolean verifyWebhookSignature(String payload, String signature, String timestamp) {
-        if (webhookVerificationKey == null || webhookVerificationKey.isEmpty()) {
-            log.warn("Webhook verification key not configured, skipping verification");
-            return true; // Allow for development, but log warning
-        }
-
-        try {
-            String signedPayload = timestamp + payload;
-
-            Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKey = new SecretKeySpec(
-                    webhookVerificationKey.getBytes(StandardCharsets.UTF_8),
-                    "HmacSHA256"
-            );
-            mac.init(secretKey);
-
-            byte[] hmacBytes = mac.doFinal(signedPayload.getBytes(StandardCharsets.UTF_8));
-            String computedSignature = Base64.getEncoder().encodeToString(hmacBytes);
-
-            boolean valid = computedSignature.equals(signature);
-
-            if (!valid) {
-                log.error("Webhook signature verification failed. Expected: {}, Got: {}",
-                        computedSignature, signature);
-            }
-
-            return valid;
-
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            log.error("Error verifying webhook signature: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Update email status from SendGrid webhook event
-     * FIXED: Uses correct ReviewRequest fields
-     */
-    public void updateEmailStatusFromWebhook(String messageId, String eventType,
-                                             String reason, OffsetDateTime eventTime) {
-        log.info("Processing SendGrid webhook - Message ID: {}, Event: {}, Reason: {}",
-                messageId, eventType, reason != null ? reason : "N/A");
-
-        try {
-            ReviewRequest reviewRequest = reviewRequestRepository
-                    .findBySendgridMessageId(messageId)
-                    .orElse(null);
-
-            if (reviewRequest == null) {
-                log.warn("No ReviewRequest found for SendGrid message ID: {}", messageId);
-                return;
-            }
-
-            // Update based on event type (monotonic progression)
-            boolean shouldUpdate = false;
-            ReviewRequest.RequestStatus newStatus = reviewRequest.getStatus();
-
-            switch (eventType.toLowerCase()) {
-                case "processed":
-                    if (reviewRequest.getEmailStatus() == null ||
-                            reviewRequest.getEmailStatus().equals("sent")) {
-                        reviewRequest.setEmailStatus("processed");
-                        shouldUpdate = true;
-                    }
-                    break;
-
-                case "delivered":
-                    if (!ReviewRequest.RequestStatus.OPENED.equals(reviewRequest.getStatus()) &&
-                            !ReviewRequest.RequestStatus.COMPLETED.equals(reviewRequest.getStatus())) {
-                        reviewRequest.setEmailStatus("delivered");
-                        reviewRequest.setDeliveredAt(eventTime);
-                        newStatus = ReviewRequest.RequestStatus.DELIVERED;
-                        shouldUpdate = true;
-                    }
-                    break;
-
-                case "open":
-                    if (!ReviewRequest.RequestStatus.COMPLETED.equals(reviewRequest.getStatus())) {
-                        reviewRequest.setEmailStatus("opened");
-                        reviewRequest.setOpenedAt(eventTime);
-                        newStatus = ReviewRequest.RequestStatus.OPENED;
-                        shouldUpdate = true;
-                    }
-                    break;
-
-                case "click":
-                    reviewRequest.setEmailStatus("clicked");
-                    reviewRequest.setClickedAt(eventTime); // Fixed: use clickedAt field
-                    newStatus = ReviewRequest.RequestStatus.CLICKED;
-                    shouldUpdate = true;
-                    break;
-
-                case "bounce":
-                    reviewRequest.setEmailStatus("bounce");
-                    reviewRequest.setEmailErrorCode(reason);
-                    newStatus = ReviewRequest.RequestStatus.BOUNCED;
-                    reviewRequest.setErrorMessage("Email bounced: " + reason);
-                    shouldUpdate = true;
-                    break;
-
-                case "dropped":
-                case "spamreport":
-                    reviewRequest.setEmailStatus(eventType);
-                    reviewRequest.setEmailErrorCode(reason);
-                    newStatus = ReviewRequest.RequestStatus.FAILED;
-                    reviewRequest.setErrorMessage("Email " + eventType + ": " + reason);
-                    shouldUpdate = true;
-                    break;
-
-                case "deferred":
-                    reviewRequest.setEmailStatus("deferred");
-                    reviewRequest.setEmailErrorCode(reason);
-                    shouldUpdate = true;
-                    break;
-            }
-
-            if (shouldUpdate) {
-                reviewRequest.setStatus(newStatus);
-                reviewRequestRepository.save(reviewRequest);
-                log.info("Updated ReviewRequest {} - Status: {}, Email Status: {}",
-                        reviewRequest.getId(), newStatus, reviewRequest.getEmailStatus());
-            }
-
-        } catch (Exception e) {
-            log.error("Failed to update ReviewRequest from webhook: {}", e.getMessage(), e);
-        }
-    }
-
-    // ========== HELPER METHODS ==========
-
-    /**
-     * Ensure CAN-SPAM compliance
+     * Ensure CAN-SPAM compliance by adding required footer
      */
     private String ensureCanSpamCompliance(String htmlContent, Long organizationId) {
-        // ... (same as before, no changes needed)
-        if (htmlContent.contains("<!-- CAN-SPAM Footer -->")) {
+        // Check if already has unsubscribe link
+        if (htmlContent != null && (htmlContent.contains("unsubscribe") || htmlContent.contains("Unsubscribe"))) {
             return htmlContent;
         }
 
@@ -624,15 +440,71 @@ public class EmailService {
         String canSpamFooter = String.format("""
             <!-- CAN-SPAM Footer -->
             <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #6b7280;">
-                <!-- footer content -->
+                <p style="margin: 0 0 8px 0;">
+                    You received this email because you did business with us.
+                </p>
+                <p style="margin: 0;">
+                    <a href="%s" style="color: #6b7280; text-decoration: underline;">Unsubscribe</a>
+                    &nbsp;|&nbsp;
+                    <a href="%s/privacy" style="color: #6b7280; text-decoration: underline;">Privacy Policy</a>
+                </p>
             </div>
-            """, unsubscribeUrl, frontendUrl, frontendUrl);
+            """, unsubscribeUrl, frontendUrl);
 
-        if (htmlContent.contains("</body>")) {
+        if (htmlContent != null && htmlContent.contains("</body>")) {
             return htmlContent.replace("</body>", canSpamFooter + "</body>");
         } else {
-            return htmlContent + canSpamFooter;
+            return (htmlContent != null ? htmlContent : "") + canSpamFooter;
         }
+    }
+
+    /**
+     * Create a test email body
+     */
+    private String createTestEmailBody() {
+        return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5;">
+                <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f5; padding: 40px 20px;">
+                    <tr>
+                        <td align="center">
+                            <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="max-width: 480px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+                                <tr>
+                                    <td style="padding: 32px 32px 24px; text-align: center; border-bottom: 1px solid #e4e4e7;">
+                                        <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #4F46E5;">Reputul</h1>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 32px;">
+                                        <h2 style="margin: 0 0 16px; font-size: 20px; font-weight: 600; color: #18181b;">✅ Email Integration Test</h2>
+                                        <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #52525b;">
+                                            If you're reading this, your Resend email integration is working correctly!
+                                        </p>
+                                        <p style="margin: 0; font-size: 13px; color: #71717a;">
+                                            Provider: Resend<br>
+                                            Time: %s
+                                        </p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 24px 32px; border-top: 1px solid #e4e4e7; text-align: center;">
+                                        <p style="margin: 0; font-size: 12px; color: #a1a1aa;">
+                                            © 2024 Reputul. All rights reserved.
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </body>
+            </html>
+            """.formatted(java.time.Instant.now().toString());
     }
 
     /**
@@ -651,7 +523,7 @@ public class EmailService {
                     .build();
 
             usageRepository.save(usage);
-            log.info("Tracked email usage for org {} - type: {}", organization.getId(), emailType);
+            log.debug("Tracked email usage for org {} - type: {}", organization.getId(), emailType);
         } catch (Exception e) {
             // Don't fail email sending if usage tracking fails
             log.error("Failed to track email usage: {}", e.getMessage());
@@ -669,18 +541,43 @@ public class EmailService {
         return email.matches(emailRegex);
     }
 
-    // ========== INNER CLASSES ==========
+    /**
+     * Check if email service is configured and ready
+     */
+    public boolean isConfigured() {
+        return enabled;
+    }
 
     /**
-     * Response wrapper for SendGrid API calls
+     * Get the active email provider name
      */
-    private static class SendGridResponse {
+    public String getActiveProvider() {
+        return enabled ? "Resend" : "None";
+    }
+
+    /**
+     * Get the configured from email address
+     */
+    public String getFromEmail() {
+        return fromEmail;
+    }
+
+    // ========================================================================
+    // INNER CLASSES
+    // ========================================================================
+
+    /**
+     * Result wrapper for email operations
+     */
+    private static class EmailResult {
         private final boolean success;
         private final String messageId;
+        private final String errorMessage;
 
-        public SendGridResponse(boolean success, String messageId) {
+        public EmailResult(boolean success, String messageId, String errorMessage) {
             this.success = success;
             this.messageId = messageId;
+            this.errorMessage = errorMessage;
         }
 
         public boolean isSuccess() {
@@ -689,6 +586,10 @@ public class EmailService {
 
         public String getMessageId() {
             return messageId;
+        }
+
+        public String getErrorMessage() {
+            return errorMessage;
         }
     }
 }

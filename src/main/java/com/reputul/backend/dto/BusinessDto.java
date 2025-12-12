@@ -7,6 +7,11 @@ import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
 
+/**
+ * Business Data Transfer Object
+ *
+ * UPDATED: Added Google Places auto-detection fields
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -18,7 +23,17 @@ public class BusinessDto {
     private String phone;
     private String website;
     private String address;
+
+    // ===== Google Places fields =====
     private String googlePlaceId;
+    private String googleReviewUrl; // NEW: Direct review URL (https://search.google.com/local/writereview?placeid=X)
+    private String googleReviewShortUrl; // NEW: g.page short URL (https://g.page/r/XXX/review)
+    private String googleSearchUrl; // NEW: Fallback search URL
+    private String googlePlaceName; // NEW: Name from Google Places API
+    private String googlePlaceFormattedAddress; // NEW: Address from Google Places API
+    private Boolean googlePlaceAutoDetected; // NEW: TRUE if auto-detected, FALSE if manual
+
+    // ===== Other platforms =====
     private String facebookPageUrl;
     private String yelpPageUrl;
 

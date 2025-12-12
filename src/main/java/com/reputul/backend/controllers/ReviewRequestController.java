@@ -48,11 +48,23 @@ public class ReviewRequestController {
 
             log.info("🚀 Sending {} review request to customer ID: {}", deliveryMethod, customerId);
 
-            // Validate customer and get customer details for phone validation
-            Customer customer = customerRepository.findById(customerId)
+            // FIX: Use the new eager loading method to fetch customer with business and user
+            Customer customer = customerRepository.findByIdWithBusinessAndUser(customerId)
                     .orElseThrow(() -> new RuntimeException("Customer not found"));
 
-            if (!customer.getBusiness().getUser().getId().equals(user.getId())) {
+            // Now business and business.user are already loaded - no lazy loading!
+            Business business = customer.getBusiness();
+            if (business == null) {
+                throw new RuntimeException("Customer has no associated business");
+            }
+
+            User businessOwner = business.getUser();
+            if (businessOwner == null) {
+                throw new RuntimeException("Business has no owner");
+            }
+
+            // Check if it belongs to the current user
+            if (!businessOwner.getId().equals(user.getId())) {
                 throw new RuntimeException("Access denied: Customer does not belong to your business");
             }
 
@@ -64,30 +76,22 @@ public class ReviewRequestController {
                             "errorMessage", "Customer phone number is required for SMS delivery"
                     ));
                 }
-
-                if (!smsService.isValidPhoneNumber(customer.getPhone())) {
+            } else if ("EMAIL".equals(deliveryMethod)) {
+                if (customer.getEmail() == null || customer.getEmail().trim().isEmpty()) {
                     return ResponseEntity.ok(Map.of(
                             "status", "FAILED",
-                            "errorMessage", "Invalid phone number format"
+                            "errorMessage", "Customer email is required for EMAIL delivery"
                     ));
                 }
             }
 
-            ReviewRequestDto result;
+            // Send review request using the service
+            ReviewRequestDto result = reviewRequestService.sendReviewRequestWithDefaultTemplate(user, customerId);
 
-            // Send based on delivery method
-            if ("SMS".equals(deliveryMethod)) {
-                result = reviewRequestService.sendSmsReviewRequest(user, customerId);
-            } else {
-                // Default to email
-                result = reviewRequestService.sendReviewRequestWithDefaultTemplate(user, customerId);
-            }
-
-            // Return success response
             return ResponseEntity.ok(Map.of(
-                    "status", "SENT",
+                    "status", result != null ? "SENT" : "FAILED",
                     "deliveryMethod", deliveryMethod,
-                    "message", deliveryMethod + " review request sent successfully!",
+                    "message", result != null ? "Review request sent successfully!" : "Failed to send request",
                     "recipient", "SMS".equals(deliveryMethod) ?
                             customer.getPhone() : customer.getEmail()
             ));
@@ -132,15 +136,62 @@ public class ReviewRequestController {
         try {
             User user = getCurrentUser(authentication);
 
-            // Extract data that the frontend actually sends
-            Long businessId = Long.valueOf(request.get("selectedBusiness").toString());
-            String customerEmail = request.get("customerEmail").toString();
-            String customerName = request.get("customerName").toString();
-            String message = request.getOrDefault("message", "").toString();
+            // FIXED: Accept both "businessId" and "selectedBusiness" for backward compatibility
+            Long businessId = null;
+            if (request.get("businessId") != null) {
+                businessId = Long.valueOf(request.get("businessId").toString());
+            } else if (request.get("selectedBusiness") != null) {
+                businessId = Long.valueOf(request.get("selectedBusiness").toString());
+            }
 
-            log.info("🚀 Sending direct review request to: {} for business: {}", customerEmail, businessId);
+            // FIX: Proper null handling for all optional fields
+            String customerEmail = request.get("customerEmail") != null ? request.get("customerEmail").toString() : null;
+            String customerPhone = request.get("customerPhone") != null ? request.get("customerPhone").toString() : null;
+            String customerName = request.get("customerName") != null ? request.get("customerName").toString() : "Valued Customer";
 
-            // Get the actual business and validate it belongs to the user
+            // FIX: Handle null message values properly
+            Object messageObj = request.get("message");
+            String message = (messageObj != null && !messageObj.toString().isEmpty()) ? messageObj.toString() : "";
+
+            // FIX: Handle null deliveryMethod values properly
+            Object deliveryMethodObj = request.get("deliveryMethod");
+            String deliveryMethod = (deliveryMethodObj != null) ? deliveryMethodObj.toString().toUpperCase() : "EMAIL";
+
+            // If customerId is provided, use that customer directly
+            Long customerId = null;
+            if (request.get("customerId") != null) {
+                customerId = Long.valueOf(request.get("customerId").toString());
+            }
+
+            log.info("🚀 Sending direct {} review request to: {} (customerId: {}, businessId: {})",
+                    deliveryMethod,
+                    "EMAIL".equals(deliveryMethod) ? customerEmail : customerPhone,
+                    customerId,
+                    businessId);
+
+            // Validation
+            if (businessId == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "FAILED",
+                        "errorMessage", "Business ID is required"
+                ));
+            }
+
+            if ("EMAIL".equals(deliveryMethod) && (customerEmail == null || customerEmail.trim().isEmpty())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "FAILED",
+                        "errorMessage", "Customer email is required for email delivery"
+                ));
+            }
+
+            if ("SMS".equals(deliveryMethod) && (customerPhone == null || customerPhone.trim().isEmpty())) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "status", "FAILED",
+                        "errorMessage", "Customer phone is required for SMS delivery"
+                ));
+            }
+
+            // Get and validate business
             Business business = businessRepository.findById(businessId)
                     .orElseThrow(() -> new RuntimeException("Business not found"));
 
@@ -148,70 +199,78 @@ public class ReviewRequestController {
                 throw new RuntimeException("Access denied: Business does not belong to you");
             }
 
-            // Get the default email template (ID 1)
-            EmailTemplate template = emailTemplateRepository.findById(1L)
-                    .orElseThrow(() -> new RuntimeException("Default email template not found"));
+            String businessName = business.getName() != null ? business.getName() : "Our Business";
 
-            // Use actual business data from your Business entity
-            String businessName = business.getName() != null ? business.getName() : "Your Business";
-            String businessPhone = business.getPhone() != null ? business.getPhone() : "";
-            String businessWebsite = business.getWebsite() != null ? business.getWebsite() : "";
+            // FIX: Extract googleReviewUrl (optional field) with proper null handling
+            Object googleReviewUrlObj = request.get("googleReviewUrl");
+            String googleReviewUrl = (googleReviewUrlObj != null && !googleReviewUrlObj.toString().trim().isEmpty())
+                    ? googleReviewUrlObj.toString()
+                    : null;
 
-            // Generate review URLs using actual business data
-            String baseUrl = "https://reputul.com";
+            // Use business's auto-detected Google URL if not provided
+            if (googleReviewUrl == null || googleReviewUrl.trim().isEmpty()) {
+                if (business.getGoogleReviewUrl() != null && !business.getGoogleReviewUrl().trim().isEmpty()) {
+                    googleReviewUrl = business.getGoogleReviewUrl();
+                } else if (business.getGoogleReviewShortUrl() != null && !business.getGoogleReviewShortUrl().trim().isEmpty()) {
+                    googleReviewUrl = business.getGoogleReviewShortUrl();
+                } else if (business.getGoogleSearchUrl() != null && !business.getGoogleSearchUrl().trim().isEmpty()) {
+                    googleReviewUrl = business.getGoogleSearchUrl();
+                } else {
+                    // Fallback to generic search
+                    googleReviewUrl = "https://www.google.com/search?q=" +
+                            businessName.replace(" ", "+") + "+reviews";
+                }
+            }
 
-            // Generate Google review URL from googlePlaceId if available
-            String googleReviewUrl = business.getGooglePlaceId() != null ?
-                    "https://search.google.com/local/writereview?placeid=" + business.getGooglePlaceId() :
-                    "https://www.google.com/search?q=" + businessName.replace(" ", "+") + "+reviews";
-
-            // Generate Facebook review URL from facebookPageUrl if available
             String facebookReviewUrl = business.getFacebookPageUrl() != null ?
-                    business.getFacebookPageUrl() + "/reviews" :
-                    "https://www.facebook.com/search/top?q=" + businessName.replace(" ", "%20");
+                    business.getFacebookPageUrl() : null;
 
-            // Generate private feedback URL (placeholder for now)
-            String privateReviewUrl = baseUrl + "/feedback/" + businessId;
-            String unsubscribeUrl = baseUrl + "/unsubscribe/" + businessId;
+            log.info("📧 Preparing {} message for {}", deliveryMethod,
+                    "EMAIL".equals(deliveryMethod) ? customerEmail : customerPhone);
+            log.info("   Business: {}", businessName);
+            log.info("   Google URL: {}", googleReviewUrl);
 
-            // Replace template variables with actual business data
-            String emailBody = template.getBody()
-                    .replace("{{customerName}}", customerName)
-                    .replace("{{businessName}}", businessName)
-                    .replace("{{businessPhone}}", businessPhone)
-                    .replace("{{businessWebsite}}", businessWebsite)
-                    .replace("{{serviceType}}", business.getIndustry() != null ? business.getIndustry() : "Service")
-                    .replace("{{serviceDate}}", java.time.LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM d, yyyy")))
-                    .replace("{{googleReviewUrl}}", googleReviewUrl)
-                    .replace("{{facebookReviewUrl}}", facebookReviewUrl)
-                    .replace("{{privateReviewUrl}}", privateReviewUrl)
-                    .replace("{{unsubscribeUrl}}", unsubscribeUrl);
+            boolean sent = false;
 
-            // Add custom message if provided
-            if (!message.isEmpty()) {
-                emailBody = emailBody.replace("We hope you were completely satisfied with our service.",
-                        "We hope you were completely satisfied with our service. " + message);
+            if ("EMAIL".equals(deliveryMethod)) {
+                // Build and send email
+                String emailHtml = buildReviewRequestEmailHtml(
+                        customerName,
+                        businessName,
+                        googleReviewUrl,
+                        facebookReviewUrl,
+                        message
+                );
+
+                String subject = "We'd love your feedback!";
+                sent = emailService.sendTestEmail(customerEmail, subject, emailHtml);
+            } else if ("SMS".equals(deliveryMethod)) {
+                // Build and send SMS
+                String smsMessage = String.format(
+                        "Hi %s! Thanks for choosing %s. We'd love your feedback! Leave a review: %s",
+                        customerName,
+                        businessName,
+                        googleReviewUrl
+                );
+
+                SmsService.SmsResult smsResult = smsService.sendTestSms(customerPhone, smsMessage);
+                sent = smsResult.isSuccess();
+
+                if (!sent) {
+                    log.error("SMS failed: {}", smsResult.getErrorMessage());
+                }
             }
 
-            String subject = "Share Your Experience with " + businessName;
-
-            // Send the email using your existing method
-            boolean sent = emailService.sendTestEmail(customerEmail, subject, emailBody);
-
-            if (sent) {
-                log.info("✅ Review request email sent successfully to {}", customerEmail);
-            } else {
-                log.error("❌ Failed to send review request email to {}", customerEmail);
-            }
+            log.info(sent ? "✅ {} sent successfully" : "❌ {} failed to send", deliveryMethod);
 
             return ResponseEntity.ok(Map.of(
                     "status", sent ? "SENT" : "FAILED",
-                    "deliveryMethod", "EMAIL",
-                    "message", sent ? "Review request sent successfully!" : "Failed to send email",
-                    "recipient", customerEmail,
+                    "deliveryMethod", deliveryMethod,
+                    "message", sent ? "Review request sent successfully!" : "Failed to send " + deliveryMethod.toLowerCase(),
+                    "recipient", "EMAIL".equals(deliveryMethod) ? customerEmail : customerPhone,
                     "businessName", businessName,
-                    "googleReviewUrl", googleReviewUrl,
-                    "facebookReviewUrl", facebookReviewUrl
+                    "googleReviewUrl", googleReviewUrl != null ? googleReviewUrl : "",
+                    "facebookReviewUrl", facebookReviewUrl != null ? facebookReviewUrl : ""
             ));
 
         } catch (Exception e) {
@@ -223,6 +282,77 @@ public class ReviewRequestController {
                     "errorMessage", e.getMessage()
             ));
         }
+    }
+
+    /**
+     * Helper method to build review request email HTML
+     */
+    private String buildReviewRequestEmailHtml(String customerName, String businessName,
+                                               String googleReviewUrl, String facebookReviewUrl,
+                                               String customMessage) {
+        String googleButton = googleReviewUrl != null && !googleReviewUrl.trim().isEmpty() ?
+                String.format("""
+                    <a href="%s" style="display: inline-block; margin: 10px; padding: 15px 30px; background-color: #4285f4; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                        Leave a Google Review
+                    </a>
+                    """, googleReviewUrl) : "";
+
+        String facebookButton = facebookReviewUrl != null && !facebookReviewUrl.trim().isEmpty() ?
+                String.format("""
+                    <a href="%s" style="display: inline-block; margin: 10px; padding: 15px 30px; background-color: #1877f2; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                        Leave a Facebook Review
+                    </a>
+                    """, facebookReviewUrl) : "";
+
+        String messageSection = customMessage != null && !customMessage.trim().isEmpty() ?
+                String.format("<p style=\"margin: 20px 0; font-size: 16px; font-style: italic;\">%s</p>", customMessage) : "";
+
+        return String.format("""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Share Your Experience</title>
+            </head>
+            <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+                <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    
+                    <!-- Header -->
+                    <div style="background-color: #2563eb; color: white; padding: 30px 20px; text-align: center;">
+                        <h1 style="margin: 0; font-size: 24px;">%s</h1>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9;">We value your feedback</p>
+                    </div>
+                    
+                    <!-- Main Content -->
+                    <div style="padding: 30px 20px;">
+                        <p style="margin: 0 0 15px 0; font-size: 16px;">Hi %s,</p>
+                        <p style="margin: 0 0 15px 0; font-size: 16px;">Thank you for choosing %s!</p>
+                        <p style="margin: 0 0 25px 0; font-size: 16px;">We hope you were completely satisfied with our service. Would you mind taking a moment to share your experience?</p>
+                        
+                        %s
+                        
+                        <!-- Review Buttons -->
+                        <div style="text-align: center; margin: 30px 0;">
+                            %s
+                            %s
+                        </div>
+                        
+                        <p style="margin: 25px 0 0 0; font-size: 14px; color: #666; text-align: center;">
+                            Your feedback helps us improve and helps others make informed decisions.
+                        </p>
+                    </div>
+                    
+                    <!-- Footer -->
+                    <div style="background-color: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #e9ecef;">
+                        <p style="margin: 0; font-size: 12px; color: #6c757d;">
+                            © 2024 %s. All rights reserved.
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """, businessName, customerName, businessName, messageSection, googleButton, facebookButton, businessName);
     }
 
     @GetMapping("")

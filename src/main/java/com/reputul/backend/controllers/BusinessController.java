@@ -20,6 +20,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import com.reputul.backend.dto.UpdateBusinessReviewPlatformsDto;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -297,47 +298,62 @@ public class BusinessController {
         }
     }
 
-    @PutMapping("/{id}/review-platforms")
-    public ResponseEntity<?> updateReviewPlatforms(
-            @PathVariable Long id,
-            @RequestBody Map<String, String> platformData,
+    /**
+     * Update review platforms configuration
+     *
+     * UPDATED: Now supports g.page short URL
+     */
+    @PutMapping("/{businessId}/review-platforms")
+    public ResponseEntity<BusinessDto> updateReviewPlatforms(
+            @PathVariable Long businessId,
+            @RequestBody UpdateBusinessReviewPlatformsDto dto,
             @AuthenticationPrincipal UserDetails userDetails) {
+
         try {
             String email = userDetails.getUsername();
             User user = userRepo.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
-            Business business = businessRepo.findById(id)
-                    .orElseThrow(() -> new RuntimeException("Business not found"));
+            // CHANGED: Now passes googleReviewShortUrl as well
+            Business updatedBusiness = businessService.updateReviewPlatforms(
+                    businessId,
+                    dto.getGooglePlaceId(),
+                    dto.getGoogleReviewShortUrl(), // NEW PARAMETER
+                    dto.getFacebookPageUrl(),
+                    dto.getYelpPageUrl(),
+                    user
+            );
 
-            // Verify ownership
-            if (!business.getUser().getId().equals(user.getId())) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(Map.of("error", "You don't have permission to update this business"));
-            }
+            return ResponseEntity.ok(BusinessMapper.toDto(updatedBusiness));
 
-            // Update platform URLs
-            business.setGooglePlaceId(platformData.get("googlePlaceId"));
-            business.setFacebookPageUrl(platformData.get("facebookPageUrl"));
-            business.setYelpPageUrl(platformData.get("yelpPageUrl"));
-
-            // Mark as configured if at least one platform is set
-            boolean hasAtLeastOnePlatform =
-                    (platformData.get("googlePlaceId") != null && !platformData.get("googlePlaceId").isEmpty()) ||
-                            (platformData.get("facebookPageUrl") != null && !platformData.get("facebookPageUrl").isEmpty()) ||
-                            (platformData.get("yelpPageUrl") != null && !platformData.get("yelpPageUrl").isEmpty());
-
-            business.setReviewPlatformsConfigured(hasAtLeastOnePlatform);
-
-            businessRepo.save(business);
-
-            return ResponseEntity.ok(Map.of(
-                    "message", "Review platforms updated successfully",
-                    "reviewPlatformsConfigured", hasAtLeastOnePlatform
-            ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Error updating review platforms: " + e.getMessage()));
+                    .body(null);
+        }
+    }
+
+    /**
+     * Manually refresh Google Places data
+     *
+     * NEW ENDPOINT: Allows users to re-sync with Google Places API
+     */
+    @PostMapping("/{businessId}/refresh-google-places")
+    public ResponseEntity<BusinessDto> refreshGooglePlaces(
+            @PathVariable Long businessId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        try {
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            Business refreshedBusiness = businessService.refreshGooglePlacesData(businessId, user);
+
+            return ResponseEntity.ok(BusinessMapper.toDto(refreshedBusiness));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(null);
         }
     }
 }

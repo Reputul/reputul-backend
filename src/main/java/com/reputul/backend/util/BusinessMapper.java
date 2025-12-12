@@ -3,6 +3,11 @@ package com.reputul.backend.util;
 import com.reputul.backend.dto.BusinessDto;
 import com.reputul.backend.models.Business;
 
+/**
+ * Mapper utility for converting Business entities to DTOs
+ *
+ * UPDATED: Maps Google Places auto-detection fields
+ */
 public class BusinessMapper {
 
     public static BusinessDto toDto(Business business) {
@@ -17,7 +22,17 @@ public class BusinessMapper {
                 .phone(business.getPhone())
                 .website(business.getWebsite())
                 .address(business.getAddress())
+
+                // Google Places fields (UPDATED)
                 .googlePlaceId(business.getGooglePlaceId())
+                .googleReviewUrl(business.getGoogleReviewUrl())
+                .googleReviewShortUrl(business.getGoogleReviewShortUrl())
+                .googleSearchUrl(business.getGoogleSearchUrl())
+                .googlePlaceName(business.getGooglePlaceName())
+                .googlePlaceFormattedAddress(business.getGooglePlaceFormattedAddress())
+                .googlePlaceAutoDetected(business.getGooglePlaceAutoDetected())
+
+                // Other platforms
                 .facebookPageUrl(business.getFacebookPageUrl())
                 .yelpPageUrl(business.getYelpPageUrl())
 

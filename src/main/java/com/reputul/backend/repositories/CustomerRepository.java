@@ -25,6 +25,19 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
     Optional<Customer> findByIdAndUser(@Param("id") Long id, @Param("user") User user);
     List<Customer> findByUserAndBusinessOrderByCreatedAtDesc(User user, Business business);
     Optional<Customer> findByEmailAndUser(String email, User user);
+
+    @Query("SELECT c FROM Customer c " +
+            "LEFT JOIN FETCH c.business b " +
+            "LEFT JOIN FETCH b.user " +
+            "WHERE c.id = :customerId")
+    Optional<Customer> findByIdWithBusinessAndUser(@Param("customerId") Long customerId);
+
+
+
+
+
+
+
     List<Customer> findByUserAndStatusOrderByCreatedAtDesc(User user, Customer.CustomerStatus status);
 
     @Query("SELECT c FROM Customer c JOIN c.tags t WHERE c.user = :user AND t = :tag ORDER BY c.createdAt DESC")

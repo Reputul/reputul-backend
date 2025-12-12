@@ -3,6 +3,7 @@ package com.reputul.backend.repositories;
 import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.ReviewRequest;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -21,7 +22,36 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     @Query("SELECT r FROM ReviewRequest r WHERE r.business.user.id = :userId ORDER BY r.createdAt DESC")
     List<ReviewRequest> findByOwnerId(@Param("userId") Long userId);
 
-    // ========== SMS-SPECIFIC METHODS (EXISTING) ==========
+    /**
+     * Fetch review requests with all related entities to prevent LazyInitializationException
+     */
+    @Query("SELECT DISTINCT rr FROM ReviewRequest rr " +
+            "LEFT JOIN FETCH rr.customer c " +
+            "LEFT JOIN FETCH rr.business b " +
+            "LEFT JOIN FETCH rr.emailTemplate et " +
+            "WHERE b.user.id = :ownerId " +
+            "ORDER BY rr.createdAt DESC")
+    List<ReviewRequest> findByOwnerIdWithRelations(@Param("ownerId") Long ownerId);
+
+    /**
+     * Fetch review requests by business with all relations
+     */
+    @Query("SELECT DISTINCT rr FROM ReviewRequest rr " +
+            "LEFT JOIN FETCH rr.customer c " +
+            "LEFT JOIN FETCH rr.business b " +
+            "LEFT JOIN FETCH rr.emailTemplate et " +
+            "WHERE rr.business.id = :businessId " +
+            "ORDER BY rr.createdAt DESC")
+    List<ReviewRequest> findByBusinessIdWithRelations(@Param("businessId") Long businessId);
+
+
+
+
+
+
+
+
+    // ========== SMS-SPECIFIC METHODS ==========
 
     /**
      * Find review request by Twilio SMS message ID
@@ -31,19 +61,24 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Find all SMS review requests
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'SMS' ORDER BY r.createdAt DESC")
+    @Query(value = "SELECT * FROM review_requests WHERE delivery_method = 'SMS' ORDER BY created_at DESC", nativeQuery = true)
     List<ReviewRequest> findAllSmsRequests();
 
     /**
      * Find SMS requests by user
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.user.id = :userId AND r.deliveryMethod = 'SMS' ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT r.* FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'SMS'
+        ORDER BY r.created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> findSmsRequestsByUserId(@Param("userId") Long userId);
 
     /**
      * Find SMS requests by business
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.id = :businessId AND r.deliveryMethod = 'SMS' ORDER BY r.createdAt DESC")
+    @Query(value = "SELECT * FROM review_requests WHERE business_id = :businessId AND delivery_method = 'SMS' ORDER BY created_at DESC", nativeQuery = true)
     List<ReviewRequest> findSmsRequestsByBusinessId(@Param("businessId") Long businessId);
 
     /**
@@ -54,13 +89,18 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Find SMS requests by status
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'SMS' AND r.status = :status ORDER BY r.createdAt DESC")
-    List<ReviewRequest> findSmsRequestsByStatus(@Param("status") ReviewRequest.RequestStatus status);
+    @Query(value = "SELECT * FROM review_requests WHERE delivery_method = 'SMS' AND status = :status ORDER BY created_at DESC", nativeQuery = true)
+    List<ReviewRequest> findSmsRequestsByStatus(@Param("status") String status);
 
     /**
      * Count SMS requests by user and date range
      */
-    @Query("SELECT COUNT(r) FROM ReviewRequest r WHERE r.business.user.id = :userId AND r.deliveryMethod = 'SMS' AND r.createdAt BETWEEN :startDate AND :endDate")
+    @Query(value = """
+        SELECT COUNT(*) FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'SMS'
+        AND r.created_at BETWEEN :startDate AND :endDate
+        """, nativeQuery = true)
     Long countSmsRequestsByUserAndDateRange(@Param("userId") Long userId,
                                             @Param("startDate") OffsetDateTime startDate,
                                             @Param("endDate") OffsetDateTime endDate);
@@ -68,59 +108,75 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Count delivery method usage by user
      */
-    @Query("SELECT r.deliveryMethod, COUNT(r) FROM ReviewRequest r WHERE r.business.user.id = :userId GROUP BY r.deliveryMethod")
+    @Query(value = """
+        SELECT r.delivery_method, COUNT(*) FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId
+        GROUP BY r.delivery_method
+        """, nativeQuery = true)
     List<Object[]> countDeliveryMethodsByUserId(@Param("userId") Long userId);
 
     /**
      * Find failed SMS requests for retry
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'SMS' AND r.status = 'FAILED' AND r.createdAt > :since ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT * FROM review_requests
+        WHERE delivery_method = 'SMS' AND status = 'FAILED' AND created_at > :since
+        ORDER BY created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> findFailedSmsRequestsSince(@Param("since") OffsetDateTime since);
 
     /**
      * Find pending SMS requests (for cleanup/monitoring)
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'SMS' AND r.status = 'PENDING' AND r.createdAt < :olderThan")
+    @Query(value = "SELECT * FROM review_requests WHERE delivery_method = 'SMS' AND status = 'PENDING' AND created_at < :olderThan", nativeQuery = true)
     List<ReviewRequest> findPendingSmsRequestsOlderThan(@Param("olderThan") OffsetDateTime olderThan);
 
     /**
      * Find requests by SMS status (Twilio status)
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.smsStatus = :smsStatus ORDER BY r.updatedAt DESC")
+    @Query(value = "SELECT * FROM review_requests WHERE sms_status = :smsStatus ORDER BY updated_at DESC", nativeQuery = true)
     List<ReviewRequest> findBySmsStatus(@Param("smsStatus") String smsStatus);
 
     /**
      * Get SMS analytics for user
+     * FIXED: Using native SQL for CASE WHEN with string enum values
      */
-    @Query("""
+    @Query(value = """
         SELECT 
-            COUNT(r) as total,
+            COUNT(*) as total,
             COUNT(CASE WHEN r.status = 'SENT' THEN 1 END) as sent,
             COUNT(CASE WHEN r.status = 'DELIVERED' THEN 1 END) as delivered,
             COUNT(CASE WHEN r.status = 'FAILED' THEN 1 END) as failed,
             COUNT(CASE WHEN r.status = 'COMPLETED' THEN 1 END) as completed
-        FROM ReviewRequest r 
-        WHERE r.business.user.id = :userId AND r.deliveryMethod = 'SMS'
-        """)
+        FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'SMS'
+        """, nativeQuery = true)
     Object[] getSmsAnalyticsByUserId(@Param("userId") Long userId);
 
     /**
      * Get recent SMS activity for dashboard
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.user.id = :userId AND r.deliveryMethod = 'SMS' AND r.createdAt > :since ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT r.* FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'SMS' AND r.created_at > :since
+        ORDER BY r.created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> getRecentSmsActivity(@Param("userId") Long userId, @Param("since") OffsetDateTime since);
 
-    // ========== EMAIL-SPECIFIC METHODS (NEW) ==========
+    // ========== EMAIL-SPECIFIC METHODS ==========
 
     /**
-     * Find review request by SendGrid message ID
+     * Find review request by SendGrid/Resend message ID
      * Used by webhook handler to update email status
      */
     Optional<ReviewRequest> findBySendgridMessageId(String sendgridMessageId);
 
     /**
      * Find the most recent pending review request for a customer
-     * Used when sending emails to attach the SendGrid message ID
+     * Used when sending emails to attach the message ID
      */
     Optional<ReviewRequest> findTopByCustomerAndStatusOrderByCreatedAtDesc(
             Customer customer,
@@ -130,70 +186,77 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Find all email review requests
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'EMAIL' ORDER BY r.createdAt DESC")
+    @Query(value = "SELECT * FROM review_requests WHERE delivery_method = 'EMAIL' ORDER BY created_at DESC", nativeQuery = true)
     List<ReviewRequest> findAllEmailRequests();
 
     /**
      * Find email requests by user
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.user.id = :userId " +
-            "AND r.deliveryMethod = 'EMAIL' ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT r.* FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'EMAIL'
+        ORDER BY r.created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> findEmailRequestsByUserId(@Param("userId") Long userId);
 
     /**
      * Find email requests by business
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.id = :businessId " +
-            "AND r.deliveryMethod = 'EMAIL' ORDER BY r.createdAt DESC")
+    @Query(value = "SELECT * FROM review_requests WHERE business_id = :businessId AND delivery_method = 'EMAIL' ORDER BY created_at DESC", nativeQuery = true)
     List<ReviewRequest> findEmailRequestsByBusinessId(@Param("businessId") Long businessId);
 
     /**
      * Find email requests with specific status
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.emailStatus = :status " +
-            "ORDER BY r.createdAt DESC")
-    List<ReviewRequest> findByEmailStatus(@Param("status") String emailStatus);
+    @Query(value = "SELECT * FROM review_requests WHERE email_status = :emailStatus ORDER BY created_at DESC", nativeQuery = true)
+    List<ReviewRequest> findByEmailStatus(@Param("emailStatus") String emailStatus);
 
     /**
      * Count email open rate for a business
      */
-    @Query("SELECT COUNT(CASE WHEN r.emailStatus IN ('opened', 'clicked', 'completed') THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) " +
-            "FROM ReviewRequest r WHERE r.business.id = :businessId " +
-            "AND r.deliveryMethod = 'EMAIL' AND r.status = 'SENT'")
+    @Query(value = """
+        SELECT COUNT(CASE WHEN email_status IN ('opened', 'clicked', 'completed') THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0)
+        FROM review_requests
+        WHERE business_id = :businessId AND delivery_method = 'EMAIL' AND status = 'SENT'
+        """, nativeQuery = true)
     Double calculateEmailOpenRate(@Param("businessId") Long businessId);
 
     /**
      * Count email click rate for a business
      */
-    @Query("SELECT COUNT(CASE WHEN r.emailStatus IN ('clicked', 'completed') THEN 1 END) * 100.0 / " +
-            "NULLIF(COUNT(CASE WHEN r.emailStatus IN ('opened', 'clicked', 'completed') THEN 1 END), 0) " +
-            "FROM ReviewRequest r WHERE r.business.id = :businessId " +
-            "AND r.deliveryMethod = 'EMAIL' AND r.emailStatus IS NOT NULL")
+    @Query(value = """
+        SELECT COUNT(CASE WHEN email_status IN ('clicked', 'completed') THEN 1 END) * 100.0 /
+            NULLIF(COUNT(CASE WHEN email_status IN ('opened', 'clicked', 'completed') THEN 1 END), 0)
+        FROM review_requests
+        WHERE business_id = :businessId AND delivery_method = 'EMAIL' AND email_status IS NOT NULL
+        """, nativeQuery = true)
     Double calculateEmailClickRate(@Param("businessId") Long businessId);
 
     /**
      * Find bounced emails for a business
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.id = :businessId " +
-            "AND r.emailStatus IN ('bounce', 'dropped', 'spamreport') " +
-            "ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT * FROM review_requests
+        WHERE business_id = :businessId AND email_status IN ('bounce', 'dropped', 'spamreport')
+        ORDER BY created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> findBouncedEmails(@Param("businessId") Long businessId);
 
     /**
      * Get email delivery stats for a time period
      */
-    @Query("""
+    @Query(value = """
         SELECT 
             COUNT(*) as total,
-            COUNT(CASE WHEN r.emailStatus = 'delivered' THEN 1 END) as delivered,
-            COUNT(CASE WHEN r.emailStatus = 'opened' THEN 1 END) as opened,
-            COUNT(CASE WHEN r.emailStatus = 'clicked' THEN 1 END) as clicked,
-            COUNT(CASE WHEN r.emailStatus IN ('bounce', 'dropped') THEN 1 END) as failed
-        FROM ReviewRequest r 
-        WHERE r.business.id = :businessId 
-        AND r.deliveryMethod = 'EMAIL' 
-        AND r.createdAt BETWEEN :startDate AND :endDate
-        """)
+            COUNT(CASE WHEN email_status = 'delivered' THEN 1 END) as delivered,
+            COUNT(CASE WHEN email_status = 'opened' THEN 1 END) as opened,
+            COUNT(CASE WHEN email_status = 'clicked' THEN 1 END) as clicked,
+            COUNT(CASE WHEN email_status IN ('bounce', 'dropped') THEN 1 END) as failed
+        FROM review_requests
+        WHERE business_id = :businessId AND delivery_method = 'EMAIL'
+        AND created_at BETWEEN :startDate AND :endDate
+        """, nativeQuery = true)
     List<Object[]> getEmailStats(
             @Param("businessId") Long businessId,
             @Param("startDate") OffsetDateTime startDate,
@@ -203,16 +266,21 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Find review requests with delivery issues
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'EMAIL' " +
-            "AND r.status = 'SENT' AND r.emailStatus IS NULL " +
-            "AND r.sentAt < :cutoffTime")
+    @Query(value = """
+        SELECT * FROM review_requests
+        WHERE delivery_method = 'EMAIL' AND status = 'SENT' AND email_status IS NULL AND sent_at < :cutoffTime
+        """, nativeQuery = true)
     List<ReviewRequest> findStuckEmailRequests(@Param("cutoffTime") OffsetDateTime cutoffTime);
 
     /**
      * Count email requests by user and date range
      */
-    @Query("SELECT COUNT(r) FROM ReviewRequest r WHERE r.business.user.id = :userId " +
-            "AND r.deliveryMethod = 'EMAIL' AND r.createdAt BETWEEN :startDate AND :endDate")
+    @Query(value = """
+        SELECT COUNT(*) FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'EMAIL'
+        AND r.created_at BETWEEN :startDate AND :endDate
+        """, nativeQuery = true)
     Long countEmailRequestsByUserAndDateRange(
             @Param("userId") Long userId,
             @Param("startDate") OffsetDateTime startDate,
@@ -222,55 +290,63 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Find failed email requests for retry
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.deliveryMethod = 'EMAIL' " +
-            "AND r.status = 'FAILED' AND r.createdAt > :since ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT * FROM review_requests
+        WHERE delivery_method = 'EMAIL' AND status = 'FAILED' AND created_at > :since
+        ORDER BY created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> findFailedEmailRequestsSince(@Param("since") OffsetDateTime since);
 
     /**
      * Get email analytics for user
+     * FIXED: Using native SQL for CASE WHEN with string enum values
      */
-    @Query("""
+    @Query(value = """
         SELECT 
-            COUNT(r) as total,
+            COUNT(*) as total,
             COUNT(CASE WHEN r.status = 'SENT' THEN 1 END) as sent,
             COUNT(CASE WHEN r.status = 'DELIVERED' THEN 1 END) as delivered,
-            COUNT(CASE WHEN r.emailStatus = 'opened' THEN 1 END) as opened,
-            COUNT(CASE WHEN r.emailStatus = 'clicked' THEN 1 END) as clicked,
+            COUNT(CASE WHEN r.email_status = 'opened' THEN 1 END) as opened,
+            COUNT(CASE WHEN r.email_status = 'clicked' THEN 1 END) as clicked,
             COUNT(CASE WHEN r.status = 'FAILED' THEN 1 END) as failed,
             COUNT(CASE WHEN r.status = 'COMPLETED' THEN 1 END) as completed
-        FROM ReviewRequest r 
-        WHERE r.business.user.id = :userId AND r.deliveryMethod = 'EMAIL'
-        """)
+        FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'EMAIL'
+        """, nativeQuery = true)
     Object[] getEmailAnalyticsByUserId(@Param("userId") Long userId);
 
     /**
      * Get recent email activity for dashboard
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.user.id = :userId " +
-            "AND r.deliveryMethod = 'EMAIL' AND r.createdAt > :since ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT r.* FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.delivery_method = 'EMAIL' AND r.created_at > :since
+        ORDER BY r.created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> getRecentEmailActivity(@Param("userId") Long userId, @Param("since") OffsetDateTime since);
 
     // ========== COMBINED ANALYTICS (EMAIL + SMS) ==========
 
     /**
      * Get overall delivery stats for all methods
-     * FIXED: Changed EXTRACT(EPOCH FROM ...) to use TIMESTAMPDIFF for Hibernate 6.5+ compatibility
      */
-    @Query("""
+    @Query(value = """
         SELECT 
-            r.deliveryMethod,
-            COUNT(r) as total,
+            r.delivery_method,
+            COUNT(*) as total,
             COUNT(CASE WHEN r.status IN ('SENT', 'DELIVERED', 'OPENED', 'CLICKED', 'COMPLETED') THEN 1 END) as successful,
             COUNT(CASE WHEN r.status = 'FAILED' THEN 1 END) as failed,
             COUNT(CASE WHEN r.status = 'COMPLETED' THEN 1 END) as completed,
-            AVG(CASE WHEN r.status = 'COMPLETED' AND r.reviewedAt IS NOT NULL AND r.sentAt IS NOT NULL THEN 
-                TIMESTAMPDIFF(HOUR, r.sentAt, r.reviewedAt)
-            END) as avgHoursToComplete
-        FROM ReviewRequest r 
-        WHERE r.business.id = :businessId 
-        AND r.createdAt BETWEEN :startDate AND :endDate
-        GROUP BY r.deliveryMethod
-        """)
+            AVG(CASE WHEN r.status = 'COMPLETED' AND r.reviewed_at IS NOT NULL AND r.sent_at IS NOT NULL THEN 
+                EXTRACT(EPOCH FROM (r.reviewed_at - r.sent_at)) / 3600
+            END) as avg_hours_to_complete
+        FROM review_requests r
+        WHERE r.business_id = :businessId
+        AND r.created_at BETWEEN :startDate AND :endDate
+        GROUP BY r.delivery_method
+        """, nativeQuery = true)
     List<Object[]> getDeliveryMethodStats(
             @Param("businessId") Long businessId,
             @Param("startDate") OffsetDateTime startDate,
@@ -280,8 +356,12 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Get combined recent activity
      */
-    @Query("SELECT r FROM ReviewRequest r WHERE r.business.user.id = :userId " +
-            "AND r.createdAt > :since ORDER BY r.createdAt DESC")
+    @Query(value = """
+        SELECT r.* FROM review_requests r
+        JOIN businesses b ON r.business_id = b.id
+        WHERE b.user_id = :userId AND r.created_at > :since
+        ORDER BY r.created_at DESC
+        """, nativeQuery = true)
     List<ReviewRequest> getRecentActivity(@Param("userId") Long userId, @Param("since") OffsetDateTime since);
 
     /**
@@ -293,15 +373,14 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Get completion rate by delivery method
      */
-    @Query("""
+    @Query(value = """
         SELECT 
-            r.deliveryMethod,
-            COUNT(CASE WHEN r.status = 'COMPLETED' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as completionRate
-        FROM ReviewRequest r 
-        WHERE r.business.id = :businessId 
-        AND r.sentAt IS NOT NULL
-        GROUP BY r.deliveryMethod
-        """)
+            delivery_method,
+            COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0) as completion_rate
+        FROM review_requests
+        WHERE business_id = :businessId AND sent_at IS NOT NULL
+        GROUP BY delivery_method
+        """, nativeQuery = true)
     List<Object[]> getCompletionRateByDeliveryMethod(@Param("businessId") Long businessId);
 
     /**
@@ -316,28 +395,31 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
 
     /**
      * Check if customer has pending review request
+     * FIXED: Using native SQL for IN clause with string enum values
      */
-    @Query("SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END " +
-            "FROM ReviewRequest r WHERE r.customer = :customer " +
-            "AND r.status IN ('PENDING', 'SENT', 'DELIVERED', 'OPENED')")
-    boolean hasPendingReviewRequest(@Param("customer") Customer customer);
+    @Query(value = """
+        SELECT COUNT(*) > 0
+        FROM review_requests
+        WHERE customer_id = :customerId
+        AND status IN ('PENDING', 'SENT', 'DELIVERED', 'OPENED')
+        """, nativeQuery = true)
+    boolean hasPendingReviewRequest(@Param("customerId") Long customerId);
 
     /**
      * Get review request performance metrics
      */
-    @Query("""
+    @Query(value = """
         SELECT 
-            DATE(r.createdAt) as date,
-            COUNT(r) as totalSent,
-            COUNT(CASE WHEN r.status = 'COMPLETED' THEN 1 END) as completed,
-            COUNT(CASE WHEN r.deliveryMethod = 'EMAIL' THEN 1 END) as emailsSent,
-            COUNT(CASE WHEN r.deliveryMethod = 'SMS' THEN 1 END) as smsSent
-        FROM ReviewRequest r 
-        WHERE r.business.id = :businessId 
-        AND r.createdAt >= :startDate
-        GROUP BY DATE(r.createdAt)
+            DATE(created_at) as date,
+            COUNT(*) as total_sent,
+            COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed,
+            COUNT(CASE WHEN delivery_method = 'EMAIL' THEN 1 END) as emails_sent,
+            COUNT(CASE WHEN delivery_method = 'SMS' THEN 1 END) as sms_sent
+        FROM review_requests
+        WHERE business_id = :businessId AND created_at >= :startDate
+        GROUP BY DATE(created_at)
         ORDER BY date DESC
-        """)
+        """, nativeQuery = true)
     List<Object[]> getDailyMetrics(
             @Param("businessId") Long businessId,
             @Param("startDate") OffsetDateTime startDate
@@ -346,6 +428,7 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     /**
      * Clean up old pending requests
      */
-    @Query("DELETE FROM ReviewRequest r WHERE r.status = 'PENDING' AND r.createdAt < :cutoffDate")
+    @Modifying
+    @Query(value = "DELETE FROM review_requests WHERE status = 'PENDING' AND created_at < :cutoffDate", nativeQuery = true)
     void deleteOldPendingRequests(@Param("cutoffDate") OffsetDateTime cutoffDate);
 }
