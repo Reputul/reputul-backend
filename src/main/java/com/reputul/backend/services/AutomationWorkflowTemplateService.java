@@ -20,6 +20,7 @@ import java.util.Map;
  * Creates and manages universal automation workflow templates for MVP
  * Provides 3 core templates that work for any service business
  */
+@Deprecated
 @Service
 @RequiredArgsConstructor
 @Slf4j

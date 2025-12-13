@@ -21,7 +21,12 @@ public interface CampaignSequenceRepository extends JpaRepository<CampaignSequen
     @Query("SELECT cs FROM CampaignSequence cs LEFT JOIN FETCH cs.steps WHERE cs.id = :id")
     Optional<CampaignSequence> findByIdWithSteps(@Param("id") Long id);
 
-    @Query("SELECT cs FROM CampaignSequence cs LEFT JOIN FETCH cs.steps WHERE cs.orgId = :orgId AND cs.isActive = true")
+    @Query("""
+    SELECT DISTINCT cs
+    FROM CampaignSequence cs
+    LEFT JOIN FETCH cs.steps
+    WHERE cs.orgId = :orgId
+""")
     List<CampaignSequence> findByOrgIdWithSteps(@Param("orgId") Long orgId);
 
     boolean existsByOrgIdAndName(Long orgId, String name);

@@ -14,11 +14,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @Transactional
@@ -84,9 +82,43 @@ public class CampaignSequenceService {
             return defaultSequences.getFirst();
         }
 
-        // No default found - create one automatically
-        log.info("No default campaign sequence found for org {}. Creating default sequence.", orgId);
-        return createDefaultSequence(orgId);
+        // No default found - create preset campaigns including default
+        log.info("No campaigns found for org {}. Creating preset campaigns.", orgId);
+        createPresetCampaigns(orgId);
+
+        // Return the newly created default
+        return sequenceRepository.findByOrgIdAndIsDefaultTrue(orgId)
+                .stream()
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Failed to create default campaign"));
+    }
+
+    /**
+     * NEW: Create all 4 preset campaigns for an organization
+     * Called when org has no campaigns yet
+     */
+    public void createPresetCampaigns(Long orgId) {
+        long existingCount = sequenceRepository.countByOrgId(orgId);
+        if (existingCount > 0) {
+            log.info("Org {} already has {} campaigns, skipping preset creation", orgId, existingCount);
+            return;
+        }
+
+        log.info("Creating 4 preset campaigns for org {}", orgId);
+
+        // Campaign 1: Get Reviews (DEFAULT)
+        createSequence(orgId, buildGetReviewsCampaign());
+
+        // Campaign 2: Follow-Up Sequence
+        createSequence(orgId, buildFollowUpCampaign());
+
+        // Campaign 3: Win-Back Campaign
+        createSequence(orgId, buildWinBackCampaign());
+
+        // Campaign 4: Referral Request
+        createSequence(orgId, buildReferralCampaign());
+
+        log.info("Successfully created 4 preset campaigns for org {}", orgId);
     }
 
     /**
@@ -108,8 +140,16 @@ public class CampaignSequenceService {
      * Get all sequences for organization with their steps
      */
     public List<CampaignSequence> getSequencesWithSteps(Long orgId) {
+        long count = sequenceRepository.countByOrgId(orgId);
+
+        if (count == 0) {
+            log.info("No campaigns found for org {}, creating presets", orgId);
+            createPresetCampaigns(orgId);
+        }
+
         return sequenceRepository.findByOrgIdWithSteps(orgId);
     }
+
 
     /**
      * Update an existing sequence
@@ -142,7 +182,7 @@ public class CampaignSequenceService {
         if (request.getIsDefault() != null && request.getIsDefault() && !sequence.getIsDefault()) {
             unsetOtherDefaults(sequence.getOrgId());
             sequence.setIsDefault(true);
-        } else if (request.getIsDefault() != null && !request.getIsDefault()) {
+        } else if (request.getIsDefault() != null && !request.getIsDefault() && sequence.getIsDefault()) {
             sequence.setIsDefault(false);
         }
 
@@ -200,14 +240,15 @@ public class CampaignSequenceService {
      * Update sequence active/inactive status
      */
     public CampaignSequence updateSequenceStatus(Long sequenceId, Boolean isActive) {
-        CampaignSequence sequence = sequenceRepository.findById(sequenceId)
+        CampaignSequence sequence = sequenceRepository.findByIdWithSteps(sequenceId)
                 .orElseThrow(() -> new EntityNotFoundException("Sequence not found"));
 
         sequence.setIsActive(isActive);
         sequence.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
 
-        return sequenceRepository.save(sequence);
+        return sequence;
     }
+
 
     /**
      * Set a sequence as default for an organization
@@ -241,7 +282,130 @@ public class CampaignSequenceService {
         return sequenceRepository.save(sequence);
     }
 
-    // Private helper methods
+    // ================================================================
+    // PRESET CAMPAIGN BUILDERS
+    // ================================================================
+
+    /**
+     * Campaign 1: Get Reviews (Default Campaign)
+     * Objective: Convert happy customers into 5-star Google reviews
+     * Entry: Automatically triggered when review request is created
+     */
+    private CreateSequenceRequest buildGetReviewsCampaign() {
+        CreateSequenceRequest request = new CreateSequenceRequest();
+        request.setName("Get Reviews");
+        request.setDescription("Convert happy customers into 5-star reviews with our proven 3-step SMS sequence");
+        request.setIsDefault(true); // This is the default campaign
+
+        List<CreateStepRequest> steps = List.of(
+                // Step 1: Immediate SMS
+                createStepRequest(1, 0, MessageType.SMS, null,
+                        "Hi {{customer_name}}! If you loved {{business_name}} would you mind leaving us a review? Thanks! {{review_link}}"),
+
+                // Step 2: Follow-up after 2 days
+                createStepRequest(2, 48, MessageType.SMS, null,
+                        "Hi {{customer_name}}! Just wanted to make sure you had a great experience with {{business_name}}. Would you mind sharing a quick review? {{review_link}}"),
+
+                // Step 3: Final reminder after 5 days
+                createStepRequest(3, 120, MessageType.SMS, null,
+                        "Hello {{customer_name}}! It's {{business_owner}} from {{business_name}}. We all love checking in with past customers. Mind leaving us a review? {{review_link}}")
+        );
+
+        request.setSteps(steps);
+        return request;
+    }
+
+    /**
+     * Campaign 2: Follow-Up Sequence
+     * Objective: Re-engage customers who didn't respond to initial request
+     * Entry: Manually triggered for customers with no review after 7 days
+     */
+    private CreateSequenceRequest buildFollowUpCampaign() {
+        CreateSequenceRequest request = new CreateSequenceRequest();
+        request.setName("Follow-Up Sequence");
+        request.setDescription("Professional follow-up for customers who haven't responded yet");
+        request.setIsDefault(false);
+
+        List<CreateStepRequest> steps = List.of(
+                // Step 1: Professional email reminder
+                createStepRequest(1, 0, MessageType.EMAIL_PROFESSIONAL,
+                        "How was your experience with {{business_name}}?",
+                        buildEmailTemplate("followup_professional")),
+
+                // Step 2: Friendly SMS nudge after 3 days
+                createStepRequest(2, 72, MessageType.SMS, null,
+                        "Hey {{customer_name}}! Quick reminder - would love to hear about your experience with {{business_name}}. Takes just 1 min: {{review_link}}"),
+
+                // Step 3: Final ask with gratitude after 7 days
+                createStepRequest(3, 168, MessageType.EMAIL_PROFESSIONAL,
+                        "Last chance to share your feedback!",
+                        buildEmailTemplate("followup_final"))
+        );
+
+        request.setSteps(steps);
+        return request;
+    }
+
+    /**
+     * Campaign 3: Win-Back Campaign
+     * Objective: Re-engage customers who haven't interacted in 30+ days
+     * Entry: Manually triggered for inactive customers
+     */
+    private CreateSequenceRequest buildWinBackCampaign() {
+        CreateSequenceRequest request = new CreateSequenceRequest();
+        request.setName("Win-Back Campaign");
+        request.setDescription("Re-engage past customers and remind them why they loved your service");
+        request.setIsDefault(false);
+
+        List<CreateStepRequest> steps = List.of(
+                // Step 1: "We miss you" email
+                createStepRequest(1, 0, MessageType.EMAIL_PROFESSIONAL,
+                        "We miss you, {{customer_name}}!",
+                        buildEmailTemplate("winback_initial")),
+
+                // Step 2: Special offer reminder after 3 days
+                createStepRequest(2, 72, MessageType.SMS, null,
+                        "Hey {{customer_name}}! Don't forget - 10% off your next service at {{business_name}}. Book today! {{business_phone}}"),
+
+                // Step 3: Customer success stories after 7 days
+                createStepRequest(3, 168, MessageType.EMAIL_PROFESSIONAL,
+                        "See what our customers are saying...",
+                        buildEmailTemplate("winback_social_proof"))
+        );
+
+        request.setSteps(steps);
+        return request;
+    }
+
+    /**
+     * Campaign 4: Referral Request
+     * Objective: Turn happy customers into brand advocates
+     * Entry: Triggered when customer leaves 4+ star review
+     */
+    private CreateSequenceRequest buildReferralCampaign() {
+        CreateSequenceRequest request = new CreateSequenceRequest();
+        request.setName("Referral Request");
+        request.setDescription("Ask happy reviewers to refer their friends and family");
+        request.setIsDefault(false);
+
+        List<CreateStepRequest> steps = List.of(
+                // Step 1: Thank you + referral ask (1 day after positive review)
+                createStepRequest(1, 24, MessageType.EMAIL_PROFESSIONAL,
+                        "Thank you for your amazing review!",
+                        buildEmailTemplate("referral_thankyou")),
+
+                // Step 2: Referral incentive reminder after 5 days
+                createStepRequest(2, 120, MessageType.SMS, null,
+                        "Thanks again for your 5-star review! Remember: Refer a friend to {{business_name}} and you both save $25! {{referral_link}}")
+        );
+
+        request.setSteps(steps);
+        return request;
+    }
+
+    // ================================================================
+    // PRIVATE HELPER METHODS
+    // ================================================================
 
     private void validateSequenceRequest(CreateSequenceRequest request) {
         if (request.getName() == null || request.getName().trim().isEmpty()) {
@@ -302,37 +466,6 @@ public class CampaignSequenceService {
         return stepRepository.save(step);
     }
 
-    private CampaignSequence createDefaultSequence(Long orgId) {
-        CreateSequenceRequest request = new CreateSequenceRequest();
-        request.setName("Default Review Collection");
-        request.setDescription("Proven 1 SMS + 3 email sequence for maximum review collection");
-        request.setIsDefault(true);
-
-        List<CreateStepRequest> steps = List.of(
-                // Step 1: Immediate SMS
-                createStepRequest(1, 0, MessageType.SMS, null,
-                        "Hi {{customerName}}! How was your experience with {{businessName}}? We'd love to hear about it: {{reviewLink}}"),
-
-                // Step 2: Professional email after 24 hours
-                createStepRequest(2, 24, MessageType.EMAIL_PROFESSIONAL,
-                        "How was your {{serviceType}} experience?",
-                        getDefaultEmailTemplate("professional")),
-
-                // Step 3: Personal follow-up after 5 days
-                createStepRequest(3, 120, MessageType.EMAIL_PLAIN,
-                        "Quick favor?",
-                        getDefaultEmailTemplate("plain")),
-
-                // Step 4: Final reminder after 14 days
-                createStepRequest(4, 336, MessageType.EMAIL_PLAIN,
-                        "Last chance to share your experience",
-                        getDefaultEmailTemplate("final"))
-        );
-
-        request.setSteps(steps);
-        return createSequence(orgId, request);
-    }
-
     private CreateStepRequest createStepRequest(Integer stepNumber, Integer delayHours,
                                                 MessageType messageType, String subject, String body) {
         CreateStepRequest request = new CreateStepRequest();
@@ -344,74 +477,173 @@ public class CampaignSequenceService {
         return request;
     }
 
-    private String getDefaultEmailTemplate(String type) {
-        return switch (type) {
-            case "professional" -> """
+    /**
+     * Build HTML email templates for campaigns
+     * Templates use snake_case variables: {{customer_name}}, {{business_name}}, etc.
+     */
+    private String buildEmailTemplate(String templateType) {
+        return switch (templateType) {
+            case "followup_professional" -> """
                 <!DOCTYPE html>
                 <html>
                 <head>
                     <meta charset="UTF-8">
-                    <title>Share Your Experience</title>
+                    <title>How was your experience?</title>
                 </head>
-                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                        <h2 style="color: #2c5aa0;">Thank you for choosing {{businessName}}!</h2>
-                        
-                        <p>Hi {{customerName}},</p>
-                        
-                        <p>We hope you're completely satisfied with your recent {{serviceType}} service. Your experience matters to us, and we'd love to hear about it!</p>
-                        
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="{{reviewLink}}" style="background-color: #2c5aa0; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Share Your Experience</a>
-                        </div>
-                        
-                        <p>It only takes 30 seconds and helps other customers find great service providers like us.</p>
-                        
-                        <p>Thank you for your business!</p>
-                        
-                        <p>Best regards,<br>The {{businessName}} Team</p>
-                        
-                        <hr style="margin-top: 30px; border: none; border-top: 1px solid #eee;">
-                        <p style="font-size: 12px; color: #666;">
-                            {{businessName}}<br>
-                            {{businessPhone}}<br>
-                            {{businessWebsite}}
-                        </p>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #4F46E5;">Hi {{customer_name}},</h2>
+                    
+                    <p>We noticed you haven't had a chance to share your feedback yet. Your opinion really matters to us!</p>
+                    
+                    <p>Would you mind taking 2 minutes to leave us a review?</p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{{review_link}}" style="background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Leave a Review</a>
                     </div>
+                    
+                    <p>Thanks for choosing {{business_name}}!</p>
+                    
+                    <p style="color: #666; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        {{business_name}}<br>
+                        {{business_phone}}<br>
+                        {{business_website}}
+                    </p>
                 </body>
                 </html>
                 """;
 
-            case "plain" -> """
-                Hi {{customerName}},
-                
-                I hope you were happy with your recent {{serviceType}} service from {{businessName}}.
-                
-                Would you mind taking 30 seconds to share your experience? It would mean the world to us:
-                {{reviewLink}}
-                
-                Thanks so much!
-                
-                Best,
-                {{businessName}}
-                {{businessPhone}}
+            case "followup_final" -> """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Last chance to share your feedback!</title>
+                </head>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #4F46E5;">Hi {{customer_name}},</h2>
+                    
+                    <p>This is our final reminder! We'd really appreciate hearing about your experience with {{business_name}}.</p>
+                    
+                    <p>Your feedback helps us improve and helps other customers make informed decisions.</p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{{review_link}}" style="background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Share Your Experience</a>
+                    </div>
+                    
+                    <p>Thank you for being an amazing customer!</p>
+                    
+                    <p>Best,<br>{{business_owner}}</p>
+                    
+                    <p style="color: #666; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        {{business_name}}<br>
+                        {{business_phone}}<br>
+                        {{business_website}}
+                    </p>
+                </body>
+                </html>
                 """;
 
-            case "final" -> """
-                Hi {{customerName}},
-                
-                This is my last email about your recent {{serviceType}} service.
-                
-                If you were satisfied with our work, I'd be incredibly grateful if you could leave a quick review:
-                {{reviewLink}}
-                
-                If there were any issues with our service, please reply to this email and I'll make it right.
-                
-                Thank you,
-                {{businessName}}
+            case "winback_initial" -> """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>We miss you!</title>
+                </head>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #4F46E5;">Hi {{customer_name}},</h2>
+                    
+                    <p>It's been a while since we last worked together! We hope everything has been going well.</p>
+                    
+                    <p>We'd love to help you again with any {{business_industry}} needs you might have.</p>
+                    
+                    <p><strong>As a valued past customer, we're offering 10% off your next service!</strong></p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{{business_website}}" style="background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Book Now</a>
+                    </div>
+                    
+                    <p>Looking forward to working with you again!</p>
+                    
+                    <p>Best,<br>The {{business_name}} Team</p>
+                    
+                    <p style="color: #666; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        {{business_name}}<br>
+                        {{business_phone}}<br>
+                        {{business_website}}
+                    </p>
+                </body>
+                </html>
                 """;
 
-            default -> "Thank you for choosing {{businessName}}! Please share your experience: {{reviewLink}}";
+            case "winback_social_proof" -> """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>See what our customers are saying...</title>
+                </head>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #4F46E5;">Hi {{customer_name}},</h2>
+                    
+                    <p>We wanted to share some recent success stories from customers just like you:</p>
+                    
+                    <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                        <p style="font-style: italic; color: #555;">"{{business_name}} did an amazing job! Highly recommend!"</p>
+                        <p style="text-align: right; color: #888; font-size: 14px;">- Recent Customer</p>
+                    </div>
+                    
+                    <p>We're here whenever you need us. <strong>Your 10% discount is still available!</strong></p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{{business_website}}" style="background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Get Started</a>
+                    </div>
+                    
+                    <p>Best,<br>The {{business_name}} Team</p>
+                    
+                    <p style="color: #666; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        {{business_name}}<br>
+                        {{business_phone}}<br>
+                        {{business_website}}
+                    </p>
+                </body>
+                </html>
+                """;
+
+            case "referral_thankyou" -> """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Thank you for your amazing review!</title>
+                </head>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #4F46E5;">Hi {{customer_name}},</h2>
+                    
+                    <p>Thank you so much for your wonderful review! It truly means the world to us. ⭐⭐⭐⭐⭐</p>
+                    
+                    <p>Since you had such a great experience, would you mind referring {{business_name}} to friends or family who might need our services?</p>
+                    
+                    <p><strong>For every referral that books with us, you'll get $25 off your next service!</strong></p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{{referral_link}}" style="background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Refer a Friend</a>
+                    </div>
+                    
+                    <p>Thanks for being awesome!</p>
+                    
+                    <p>Best,<br>{{business_owner}}<br>{{business_name}}</p>
+                    
+                    <p style="color: #666; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        {{business_name}}<br>
+                        {{business_phone}}<br>
+                        {{business_website}}
+                    </p>
+                </body>
+                </html>
+                """;
+
+            default -> "<p>Hi {{customer_name}}, thank you for choosing {{business_name}}!</p>";
         };
     }
 }
