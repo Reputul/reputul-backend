@@ -28,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Modern AutomationExecutorService with reactive WebClient and observability
  */
+@Deprecated
 @Service
 @RequiredArgsConstructor
 @Slf4j

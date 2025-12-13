@@ -20,6 +20,7 @@ import java.util.Map;
 /**
  * AutomationTriggerService with smart workflow timing
  */
+@Deprecated
 @Service
 @RequiredArgsConstructor
 @Slf4j

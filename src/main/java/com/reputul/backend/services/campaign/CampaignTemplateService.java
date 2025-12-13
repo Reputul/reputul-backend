@@ -3,6 +3,7 @@ package com.reputul.backend.services.campaign;
 import com.reputul.backend.models.Business;
 import com.reputul.backend.models.Customer;
 import com.reputul.backend.models.ReviewRequest;
+import com.reputul.backend.models.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ public class CampaignTemplateService {
 
     /**
      * Build template variables for a review request
+     * UPDATED: Now supports both camelCase (legacy) and snake_case (new preset campaigns)
      */
     public Map<String, Object> buildTemplateVariables(ReviewRequest reviewRequest) {
         Map<String, Object> variables = new HashMap<>();
@@ -34,45 +36,118 @@ public class CampaignTemplateService {
             // Get customer information directly from the relationship
             Customer customer = reviewRequest.getCustomer();
 
-            // Basic customer variables
-            variables.put("customerName", customer.getName() != null ? customer.getName() : "Valued Customer");
-            variables.put("customerFirstName", extractFirstName(customer.getName()));
+            // Get business owner (user)
+            User businessOwner = business.getUser();
+            String ownerName = businessOwner != null ? businessOwner.getName() : business.getName();
+
+            // Extract first name from customer name
+            String fullName = customer.getName() != null ? customer.getName() : "Valued Customer";
+            String firstName = extractFirstName(fullName);
+
+            // ================================================================
+            // CUSTOMER VARIABLES (both camelCase and snake_case)
+            // ================================================================
+
+            // Legacy camelCase (for backward compatibility)
+            variables.put("customerName", fullName);
+            variables.put("customerFirstName", firstName);
             variables.put("customerEmail", customer.getEmail());
             variables.put("customerPhone", formatPhoneNumber(customer.getPhone()));
 
-            // Business variables
+            // NEW: snake_case (for preset campaigns)
+            variables.put("customer_name", fullName);
+            variables.put("customer_first_name", firstName);
+            variables.put("customer_email", customer.getEmail());
+            variables.put("customer_phone", formatPhoneNumber(customer.getPhone()));
+
+            // ================================================================
+            // BUSINESS VARIABLES (both camelCase and snake_case)
+            // ================================================================
+
+            // Legacy camelCase
             variables.put("businessName", business.getName());
             variables.put("businessPhone", formatPhoneNumber(business.getPhone()));
             variables.put("businessWebsite", business.getWebsite());
             variables.put("businessAddress", formatAddress(business));
 
-            // Service variables - get from customer, not review request
-            variables.put("serviceType", customer.getServiceType() != null ? customer.getServiceType() : "service");
-            variables.put("serviceDate", customer.getServiceDate() != null ?
-                    customer.getServiceDate().format(DATE_FORMATTER) : "recently");
+            // NEW: snake_case
+            variables.put("business_name", business.getName());
+            variables.put("business_owner", ownerName);
+            variables.put("business_phone", formatPhoneNumber(business.getPhone()));
+            variables.put("business_website", business.getWebsite());
+            variables.put("business_address", formatAddress(business));
+            variables.put("business_industry", business.getIndustry() != null ? business.getIndustry() : "service");
 
-            // Review link - this will be generated based on your review request logic
-            variables.put("reviewLink", generateReviewLink(reviewRequest));
+            // ================================================================
+            // SERVICE VARIABLES (both camelCase and snake_case)
+            // ================================================================
 
-            // Feedback link for private feedback
-            variables.put("feedbackLink", generateFeedbackLink(reviewRequest));
+            String serviceType = customer.getServiceType() != null ? customer.getServiceType() : "service";
+            String serviceDate = customer.getServiceDate() != null ?
+                    customer.getServiceDate().format(DATE_FORMATTER) : "recently";
 
-            // Date variables
-            variables.put("currentDate", java.time.LocalDate.now().format(DATE_FORMATTER));
-            variables.put("currentYear", String.valueOf(java.time.Year.now().getValue()));
+            // Legacy camelCase
+            variables.put("serviceType", serviceType);
+            variables.put("serviceDate", serviceDate);
 
-            log.debug("Built template variables for review request {}: {}", reviewRequest.getId(), variables.keySet());
+            // NEW: snake_case
+            variables.put("service_type", serviceType);
+            variables.put("service_date", serviceDate);
+
+            // ================================================================
+            // LINK VARIABLES (both camelCase and snake_case)
+            // ================================================================
+
+            String reviewLink = generateReviewLink(reviewRequest);
+            String feedbackLink = generateFeedbackLink(reviewRequest);
+            String referralLink = generateReferralLink(reviewRequest);
+
+            // Legacy camelCase
+            variables.put("reviewLink", reviewLink);
+            variables.put("feedbackLink", feedbackLink);
+
+            // NEW: snake_case
+            variables.put("review_link", reviewLink);
+            variables.put("feedback_link", feedbackLink);
+            variables.put("referral_link", referralLink);
+
+            // ================================================================
+            // DATE VARIABLES (both camelCase and snake_case)
+            // ================================================================
+
+            String currentDate = java.time.LocalDate.now().format(DATE_FORMATTER);
+            String currentYear = String.valueOf(java.time.Year.now().getValue());
+
+            // Legacy camelCase
+            variables.put("currentDate", currentDate);
+            variables.put("currentYear", currentYear);
+
+            // NEW: snake_case
+            variables.put("current_date", currentDate);
+            variables.put("current_year", currentYear);
+
+            log.debug("Built template variables for review request {} (supports both camelCase and snake_case)",
+                    reviewRequest.getId());
 
         } catch (Exception e) {
-            log.error("Error building template variables for review request {}: {}", reviewRequest.getId(), e.getMessage(), e);
+            log.error("Error building template variables for review request {}: {}",
+                    reviewRequest.getId(), e.getMessage(), e);
 
-            // Fallback variables to prevent template errors
+            // Fallback variables to prevent template errors (both formats)
             variables.put("customerName", "Valued Customer");
+            variables.put("customer_name", "Valued Customer");
             variables.put("customerFirstName", "Customer");
+            variables.put("customer_first_name", "Customer");
             variables.put("businessName", "Our Business");
+            variables.put("business_name", "Our Business");
+            variables.put("business_owner", "Owner");
             variables.put("serviceType", "service");
+            variables.put("service_type", "service");
             variables.put("reviewLink", "#");
+            variables.put("review_link", "#");
             variables.put("feedbackLink", "#");
+            variables.put("feedback_link", "#");
+            variables.put("referral_link", "#");
         }
 
         return variables;
@@ -142,38 +217,68 @@ public class CampaignTemplateService {
 
     /**
      * Get available template variables
+     * UPDATED: Now includes both camelCase and snake_case formats
      */
     public Map<String, String> getAvailableVariables() {
         Map<String, String> variables = new HashMap<>();
 
-        // Customer variables
-        variables.put("customerName", "Customer's full name");
-        variables.put("customerFirstName", "Customer's first name");
-        variables.put("customerEmail", "Customer's email address");
-        variables.put("customerPhone", "Customer's phone number");
+        // ================================================================
+        // CUSTOMER VARIABLES
+        // ================================================================
+        variables.put("customer_name", "Customer's full name (NEW: snake_case)");
+        variables.put("customerName", "Customer's full name (LEGACY: camelCase)");
+        variables.put("customer_first_name", "Customer's first name (NEW: snake_case)");
+        variables.put("customerFirstName", "Customer's first name (LEGACY: camelCase)");
+        variables.put("customer_email", "Customer's email address (NEW: snake_case)");
+        variables.put("customerEmail", "Customer's email address (LEGACY: camelCase)");
+        variables.put("customer_phone", "Customer's phone number (NEW: snake_case)");
+        variables.put("customerPhone", "Customer's phone number (LEGACY: camelCase)");
 
-        // Business variables
-        variables.put("businessName", "Business name");
-        variables.put("businessPhone", "Business phone number");
-        variables.put("businessWebsite", "Business website URL");
-        variables.put("businessAddress", "Business address");
+        // ================================================================
+        // BUSINESS VARIABLES
+        // ================================================================
+        variables.put("business_name", "Business name (NEW: snake_case)");
+        variables.put("businessName", "Business name (LEGACY: camelCase)");
+        variables.put("business_owner", "Business owner/contact name (NEW: snake_case)");
+        variables.put("business_phone", "Business phone number (NEW: snake_case)");
+        variables.put("businessPhone", "Business phone number (LEGACY: camelCase)");
+        variables.put("business_website", "Business website URL (NEW: snake_case)");
+        variables.put("businessWebsite", "Business website URL (LEGACY: camelCase)");
+        variables.put("business_address", "Business address (NEW: snake_case)");
+        variables.put("businessAddress", "Business address (LEGACY: camelCase)");
+        variables.put("business_industry", "Business industry/type (NEW: snake_case)");
 
-        // Service variables
-        variables.put("serviceType", "Type of service provided");
-        variables.put("serviceDate", "Date service was completed");
+        // ================================================================
+        // SERVICE VARIABLES
+        // ================================================================
+        variables.put("service_type", "Type of service provided (NEW: snake_case)");
+        variables.put("serviceType", "Type of service provided (LEGACY: camelCase)");
+        variables.put("service_date", "Date service was completed (NEW: snake_case)");
+        variables.put("serviceDate", "Date service was completed (LEGACY: camelCase)");
 
-        // Link variables
-        variables.put("reviewLink", "Link to leave a public review");
-        variables.put("feedbackLink", "Link to private feedback form");
+        // ================================================================
+        // LINK VARIABLES
+        // ================================================================
+        variables.put("review_link", "Link to leave a public review (NEW: snake_case)");
+        variables.put("reviewLink", "Link to leave a public review (LEGACY: camelCase)");
+        variables.put("feedback_link", "Link to private feedback form (NEW: snake_case)");
+        variables.put("feedbackLink", "Link to private feedback form (LEGACY: camelCase)");
+        variables.put("referral_link", "Referral program link (NEW: snake_case)");
 
-        // Date variables
-        variables.put("currentDate", "Current date");
-        variables.put("currentYear", "Current year");
+        // ================================================================
+        // DATE VARIABLES
+        // ================================================================
+        variables.put("current_date", "Current date (NEW: snake_case)");
+        variables.put("currentDate", "Current date (LEGACY: camelCase)");
+        variables.put("current_year", "Current year (NEW: snake_case)");
+        variables.put("currentYear", "Current year (LEGACY: camelCase)");
 
         return variables;
     }
 
-    // Private helper methods
+    // ================================================================
+    // PRIVATE HELPER METHODS
+    // ================================================================
 
     private String extractFirstName(String fullName) {
         if (fullName == null || fullName.trim().isEmpty()) {
@@ -216,9 +321,12 @@ public class CampaignTemplateService {
     }
 
     private String generateReviewLink(ReviewRequest reviewRequest) {
-        // This should generate the appropriate review link based on your feedback gate logic
-        // For now, return a placeholder - you'll implement this based on your existing review link generation
+        // Use the review link already generated in the ReviewRequest
+        if (reviewRequest.getReviewLink() != null && !reviewRequest.getReviewLink().isEmpty()) {
+            return reviewRequest.getReviewLink();
+        }
 
+        // Fallback: generate feedback gate link
         String baseUrl = "https://app.reputul.com"; // TODO: Make this configurable
         return String.format("%s/feedback-gate/%s", baseUrl, reviewRequest.getCustomer().getId());
     }
@@ -227,5 +335,15 @@ public class CampaignTemplateService {
         // Generate private feedback link
         String baseUrl = "https://app.reputul.com"; // TODO: Make this configurable
         return String.format("%s/feedback/%s", baseUrl, reviewRequest.getCustomer().getId());
+    }
+
+    private String generateReferralLink(ReviewRequest reviewRequest) {
+        // Generate referral program link
+        // TODO: Implement actual referral link generation based on your referral program
+        String baseUrl = "https://app.reputul.com"; // TODO: Make this configurable
+        Long businessId = reviewRequest.getBusiness().getId();
+        Long customerId = reviewRequest.getCustomer().getId();
+
+        return String.format("%s/referral/%s?ref=%s", baseUrl, businessId, customerId);
     }
 }

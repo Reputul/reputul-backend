@@ -34,6 +34,7 @@ import java.util.concurrent.CompletableFuture;
  * - Execution state management
  * - System health monitoring and cleanup
  */
+@Deprecated
 @Service
 @RequiredArgsConstructor
 @Slf4j

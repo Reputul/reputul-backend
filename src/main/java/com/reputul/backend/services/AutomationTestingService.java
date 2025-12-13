@@ -22,6 +22,7 @@ import java.util.Map;
  * Provides testing utilities for automation workflows
  * Allows users to test workflows before going live
  */
+@Deprecated
 @Service
 @RequiredArgsConstructor
 @Slf4j

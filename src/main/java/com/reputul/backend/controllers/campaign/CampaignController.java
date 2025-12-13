@@ -49,7 +49,7 @@ public class CampaignController {
     @GetMapping("/sequences")
     public ResponseEntity<List<CampaignSequenceDto>> getSequences(Authentication authentication) {
         User user = getCurrentUser(authentication);
-        List<CampaignSequence> sequences = sequenceService.getActiveSequences(user.getOrganization().getId());
+        List<CampaignSequence> sequences = sequenceService.getSequencesWithSteps(user.getOrganization().getId());
 
         List<CampaignSequenceDto> dtos = sequences.stream()
                 .map(this::convertSequenceToDto)
