@@ -1,5 +1,6 @@
 package com.reputul.backend.integrations;
 
+import com.reputul.backend.exceptions.TokenExpiredException;
 import com.reputul.backend.models.ChannelCredential;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -7,13 +8,17 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 
 /**
  * Google My Business API integration
+ *
+ * UPDATED: Implements automatic token refresh using OAuth2 refresh tokens
  */
 @Service
 @Slf4j
@@ -96,6 +101,85 @@ public class GoogleMyBusinessClient implements PlatformReviewClient {
         }
     }
 
+    // ========================================
+    // UPDATED: Automatic token refresh implementation
+    // ========================================
+
+    @Override
+    public ChannelCredential refreshToken(ChannelCredential credential)
+            throws PlatformIntegrationException {
+
+        if (credential.getRefreshToken() == null || credential.getRefreshToken().trim().isEmpty()) {
+            log.error("No refresh token available for credential {}", credential.getId());
+            throw new TokenExpiredException(
+                    credential.getPlatformType().name(),
+                    credential.getId(),
+                    "No refresh token available. Please reconnect Google."
+            );
+        }
+
+        try {
+            log.info("Refreshing Google access token for credential {}", credential.getId());
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+            MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+            params.add("client_id", clientId);
+            params.add("client_secret", clientSecret);
+            params.add("refresh_token", credential.getRefreshToken());
+            params.add("grant_type", "refresh_token");
+
+            HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(params, headers);
+
+            ResponseEntity<Map> response = restTemplate.postForEntity(TOKEN_URL, request, Map.class);
+
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+                throw new PlatformIntegrationException("Token refresh failed");
+            }
+
+            Map<String, Object> body = response.getBody();
+
+            // Update credential with new token
+            credential.setAccessToken((String) body.get("access_token"));
+
+            // Calculate new expiry time (Google tokens last 1 hour)
+            Integer expiresIn = (Integer) body.get("expires_in");
+            if (expiresIn != null) {
+                credential.setTokenExpiresAt(
+                        OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(expiresIn)
+                );
+            }
+
+            // Update status
+            credential.setStatus(ChannelCredential.CredentialStatus.ACTIVE);
+            credential.setSyncErrorMessage(null);
+
+            log.info("Successfully refreshed Google token for credential {}", credential.getId());
+
+            return credential;
+
+        } catch (HttpClientErrorException e) {
+            // Handle specific OAuth errors (invalid_grant, etc.)
+            log.error("Google token refresh failed: {}", e.getMessage());
+
+            // Mark credential as expired
+            credential.setStatus(ChannelCredential.CredentialStatus.EXPIRED);
+            credential.setSyncErrorMessage("Token refresh failed. Please reconnect.");
+
+            throw new TokenExpiredException(
+                    credential.getPlatformType().name(),
+                    credential.getId(),
+                    "Google access has been revoked. Please reconnect.",
+                    e
+            );
+
+        } catch (Exception e) {
+            log.error("Unexpected error refreshing Google token", e);
+            throw new PlatformIntegrationException("Token refresh error: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public List<PlatformReviewDto> fetchReviews(ChannelCredential credential, OffsetDateTime sinceDate)
             throws PlatformIntegrationException {
@@ -111,8 +195,8 @@ public class GoogleMyBusinessClient implements PlatformReviewClient {
                         .reviewerPhotoUrl("https://lh3.googleusercontent.com/a/default-user")
                         .rating(5)
                         .comment("Outstanding work! The team at Duckweed Digital was professional, efficient, and delivered exactly what we needed. Highly recommend!")
-                        .createdAt(OffsetDateTime.now().minusDays(3))
-                        .updatedAt(OffsetDateTime.now().minusDays(3))
+                        .createdAt(OffsetDateTime.now().minusDays(1))
+                        .updatedAt(OffsetDateTime.now().minusDays(1))
                         .isPlatformVerified(true)
                         .build(),
 
@@ -139,41 +223,23 @@ public class GoogleMyBusinessClient implements PlatformReviewClient {
         );
     }
 
-//    @Override
-//    public List<PlatformReviewDto> fetchReviews(ChannelCredential credential, OffsetDateTime sinceDate)
-//            throws PlatformIntegrationException {
-//
-//        log.info("Fetching Google reviews for business {}", credential.getBusiness().getId());
-//
-//        try {
-//            // Step 1: Get account
-//            String accountName = getFirstAccount(credential.getAccessToken());
-//            log.info("Found Google account: {}", accountName);
-//
-//            // Step 2: Get locations for this account
-//            List<String> locationNames = getLocations(credential.getAccessToken(), accountName);
-//            log.info("Found {} Google locations", locationNames.size());
-//
-//            if (locationNames.isEmpty()) {
-//                log.warn("No Google locations found for account {}", accountName);
-//                return Collections.emptyList();
-//            }
-//
-//            // Step 3: Fetch reviews from first location (for now)
-//            String locationName = locationNames.get(0);
-//            List<PlatformReviewDto> reviews = fetchLocationReviews(
-//                    credential.getAccessToken(),
-//                    locationName
-//            );
-//
-//            log.info("Fetched {} reviews from Google location {}", reviews.size(), locationName);
-//            return reviews;
-//
-//        } catch (Exception e) {
-//            log.error("Error fetching Google reviews", e);
-//            throw new PlatformIntegrationException("Failed to fetch Google reviews: " + e.getMessage(), e);
-//        }
-//    }
+    @Override
+    public void postReviewResponse(ChannelCredential credential, String reviewId, String responseText)
+            throws PlatformIntegrationException {
+        // TODO: Implement review response posting
+        log.warn("Google review response not yet implemented");
+        throw new PlatformIntegrationException("Review response not yet configured");
+    }
+
+    @Override
+    public boolean validateCredentials(ChannelCredential credential) {
+        try {
+            getFirstAccount(credential.getAccessToken());
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     private String getFirstAccount(String accessToken) throws PlatformIntegrationException {
         try {
@@ -285,16 +351,6 @@ public class GoogleMyBusinessClient implements PlatformReviewClient {
     }
 
     private PlatformReviewDto parseGoogleReview(Map<String, Object> data) {
-        // Google review structure:
-        // {
-        //   "reviewId": "...",
-        //   "reviewer": { "displayName": "John Doe", "profilePhotoUrl": "..." },
-        //   "starRating": "FIVE", // or "FOUR", "THREE", etc.
-        //   "comment": "Great service!",
-        //   "createTime": "2024-01-15T10:30:00Z",
-        //   "updateTime": "2024-01-15T10:30:00Z"
-        // }
-
         Map<String, Object> reviewer = (Map<String, Object>) data.get("reviewer");
         String starRating = (String) data.get("starRating");
 
@@ -331,31 +387,5 @@ public class GoogleMyBusinessClient implements PlatformReviewClient {
             log.warn("Failed to parse Google timestamp: {}", timestamp);
             return OffsetDateTime.now();
         }
-    }
-
-    @Override
-    public void postReviewResponse(ChannelCredential credential, String reviewId, String responseText)
-            throws PlatformIntegrationException {
-        // TODO: Implement review response posting
-        log.warn("Google review response not yet implemented");
-        throw new PlatformIntegrationException("Review response not yet configured");
-    }
-
-    @Override
-    public boolean validateCredentials(ChannelCredential credential) {
-        try {
-            getFirstAccount(credential.getAccessToken());
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    @Override
-    public ChannelCredential refreshToken(ChannelCredential credential)
-            throws PlatformIntegrationException {
-        // TODO: Implement token refresh
-        log.warn("Google token refresh not yet implemented");
-        throw new PlatformIntegrationException("Token refresh not yet configured");
     }
 }

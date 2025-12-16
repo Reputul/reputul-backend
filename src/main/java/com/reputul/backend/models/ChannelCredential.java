@@ -89,7 +89,6 @@ public class ChannelCredential {
     @PreUpdate
     protected void onUpdate() {
         updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
-        syncMetadataToJson();
     }
 
     @PostLoad

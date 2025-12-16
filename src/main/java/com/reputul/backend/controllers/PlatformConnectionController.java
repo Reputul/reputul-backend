@@ -1,5 +1,6 @@
 package com.reputul.backend.controllers;
 
+import com.reputul.backend.exceptions.TokenExpiredException;
 import com.reputul.backend.integrations.*;
 import com.reputul.backend.models.*;
 import com.reputul.backend.repositories.*;
@@ -365,7 +366,106 @@ public class PlatformConnectionController {
     }
 
     /**
+     * Initiate OAuth connection flow
+     * Frontend-friendly endpoint that accepts POST with JSON body
+     *
+     * @param request JSON body with platform and businessId
+     * @param authentication Current user authentication
+     * @return JSON with authorization URL
+     */
+    @PostMapping("/oauth/initiate")
+    public ResponseEntity<?> initiateOAuthConnection(
+            @RequestBody Map<String, Object> request,
+            Authentication authentication) {
+
+        try {
+            String platformType = (String) request.get("platform");
+            Long businessId = ((Number) request.get("businessId")).longValue();
+
+            User user = getUserFromAuth(authentication);
+            Business business = businessRepository.findById(businessId)
+                    .orElseThrow(() -> new IllegalArgumentException("Business not found"));
+
+            // Verify ownership - check if business belongs to user's organization
+            if (!business.getOrganization().getId().equals(user.getOrganization().getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Not authorized to connect platforms for this business"));
+            }
+
+            ChannelCredential.PlatformType platform = parsePlatformType(platformType);
+
+            PlatformReviewClient client = platformClients.get(platform);
+            if (client == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Platform not supported: " + platformType));
+            }
+
+            // Generate state token for CSRF protection
+            String state = UUID.randomUUID().toString();
+            String redirectUri = getRedirectUri(platform);
+
+            String authUrl = client.getAuthorizationUrl(state, redirectUri);
+
+            // CRITICAL FIX: Delete old credential if exists, then create fresh one
+            // This avoids JPA dirty-checking issues when reusing entities
+            Optional<ChannelCredential> existingCred = credentialRepository
+                    .findByBusinessIdAndPlatformType(businessId, platform);
+
+            if (existingCred.isPresent()) {
+                log.info("Deleting old {} credential {} before creating new one",
+                        platform, existingCred.get().getId());
+                credentialRepository.delete(existingCred.get());
+                credentialRepository.flush(); // Ensure delete completes before insert
+            }
+
+            // Always create fresh credential (avoid JPA entity reuse issues)
+            ChannelCredential pendingCred = ChannelCredential.builder()
+                    .organization(business.getOrganization())
+                    .business(business)
+                    .platformType(platform)
+                    .status(ChannelCredential.CredentialStatus.PENDING)
+                    .createdBy(user)
+                    .build();
+
+            // Set metadataJson directly to ensure it persists
+            Map<String, Object> metadata = Map.of("state", state, "businessId", businessId);
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                String metadataJson = mapper.writeValueAsString(metadata);
+                pendingCred.setMetadataJson(metadataJson);
+                pendingCred.setMetadata(metadata); // Also set transient field for in-memory use
+            } catch (Exception e) {
+                log.error("Failed to serialize metadata", e);
+                throw new RuntimeException("Failed to serialize metadata");
+            }
+
+            log.info("Created new {} credential for business {} (state: {})",
+                    platform, businessId, state);
+
+            // Save and flush to ensure immediate persistence
+            credentialRepository.saveAndFlush(pendingCred);
+
+            log.info("Saved credential ID {} with metadataJson: {}",
+                    pendingCred.getId(), pendingCred.getMetadataJson());
+
+            return ResponseEntity.ok(Map.of(
+                    "authUrl", authUrl,
+                    "state", state,
+                    "platform", platform.name()
+            ));
+
+        } catch (Exception e) {
+            log.error("Error initiating OAuth connection", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
      * Manually trigger sync for a platform
+     *
+     * UPDATED: Removed manual token refresh - ReviewSyncService now handles this automatically
+     * TokenExpiredException is allowed to propagate to GlobalExceptionHandler
      *
      * @param credentialId Credential ID to sync
      * @param authentication Current user
@@ -387,21 +487,8 @@ public class PlatformConnectionController {
                         .body(Map.of("error", "Not authorized"));
             }
 
-            // Check if token needs refresh
-            if (credential.needsRefresh()) {
-                log.info("Token needs refresh, attempting to refresh before sync");
-                PlatformReviewClient client = platformClients.get(credential.getPlatformType());
-                if (client != null) {
-                    try {
-                        credential = client.refreshToken(credential);
-                        credentialRepository.save(credential);
-                    } catch (PlatformIntegrationException e) {
-                        log.warn("Token refresh failed: {}", e.getMessage());
-                        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                                .body(Map.of("error", "Token expired. Please reconnect the platform."));
-                    }
-                }
-            }
+            // REMOVED: Manual token refresh logic - ReviewSyncService handles this now
+            // The sync service will automatically refresh/extend tokens as needed
 
             ReviewSyncJob job = reviewSyncService.syncPlatformReviews(
                     credential, credential.getBusiness());
@@ -409,11 +496,16 @@ public class PlatformConnectionController {
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "jobId", job.getId(),
-                    "status", job.getStatus(),
-                    "reviewsFetched", job.getReviewsFetched(),
-                    "reviewsNew", job.getReviewsNew(),
-                    "reviewsUpdated", job.getReviewsUpdated()
+                    "status", job.getStatus().name(),
+                    "reviewsFetched", job.getReviewsFetched() != null ? job.getReviewsFetched() : 0,
+                    "newCount", job.getReviewsNew() != null ? job.getReviewsNew() : 0,
+                    "updatedCount", job.getReviewsUpdated() != null ? job.getReviewsUpdated() : 0
             ));
+
+        } catch (TokenExpiredException e) {
+            // Let TokenExpiredException propagate to GlobalExceptionHandler
+            // GlobalExceptionHandler will return proper 401 response
+            throw e;
 
         } catch (Exception e) {
             log.error("Error triggering sync", e);

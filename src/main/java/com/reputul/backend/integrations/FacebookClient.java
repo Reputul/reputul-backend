@@ -1,13 +1,23 @@
 package com.reputul.backend.integrations;
 
-import com.reputul.backend.models.ChannelCredential;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.reputul.backend.exceptions.TokenExpiredException;
+import com.reputul.backend.models.ChannelCredential;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -15,46 +25,37 @@ import java.time.ZoneOffset;
 import java.util.*;
 
 /**
- * Facebook Graph API integration for review management
- * API Version: v21.0 (latest stable as of 2025)
+ * Facebook Page Reviews integration
  *
- * Features:
- * - OAuth 2.0 authentication with long-lived tokens
- * - Page access token exchange for page-level permissions
- * - Review/rating fetching from Facebook pages
- * - Automatic token refresh
- * - Comprehensive error handling and retry logic
- *
- * @see <a href="https://developers.facebook.com/docs/graph-api">Facebook Graph API</a>
+ * UPDATED: Implements automatic token extension for long-lived tokens
  */
 @Service
 @Slf4j
 public class FacebookClient implements PlatformReviewClient {
 
-    @Value("${facebook.oauth.app-id}")
+    @Value("${facebook.app.id}")
     private String appId;
 
-    @Value("${facebook.oauth.app-secret}")
+    @Value("${facebook.app.secret}")
     private String appSecret;
 
-    @Value("${facebook.oauth.redirect-uri:http://localhost:3000/oauth/callback/facebook}")
+    @Value("${facebook.oauth.redirect-uri}")
     private String redirectUri;
 
-    // Facebook Graph API v21.0 endpoints
-    private static final String API_VERSION = "v21.0";
-    private static final String OAUTH_URL = "https://www.facebook.com/" + API_VERSION + "/dialog/oauth";
-    private static final String TOKEN_URL = "https://graph.facebook.com/" + API_VERSION + "/oauth/access_token";
-    private static final String GRAPH_API_URL = "https://graph.facebook.com/" + API_VERSION;
+    private static final String OAUTH_URL = "https://www.facebook.com/v18.0/dialog/oauth";
+    private static final String TOKEN_URL = "https://graph.facebook.com/v18.0/oauth/access_token";
+    private static final String TOKEN_EXCHANGE_URL = "https://graph.facebook.com/v18.0/oauth/access_token";
+    private static final String GRAPH_API_BASE = "https://graph.facebook.com/v18.0";
 
-    // OAuth scopes required for review management
-    private static final String SCOPES = "pages_show_list,pages_read_engagement,pages_manage_metadata,pages_read_user_content";
+    // Facebook permissions for pages and ratings
+    private static final String PERMISSIONS = "pages_show_list,pages_read_engagement,pages_manage_metadata";
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    public FacebookClient(RestTemplate restTemplate) {
+    public FacebookClient(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -62,595 +63,316 @@ public class FacebookClient implements PlatformReviewClient {
         return ChannelCredential.PlatformType.FACEBOOK;
     }
 
-    /**
-     * Generate OAuth authorization URL for Facebook
-     *
-     * @param state CSRF protection token
-     * @param redirectUriParam Optional custom redirect URI
-     * @return Authorization URL for user to grant permissions
-     */
     @Override
     public String getAuthorizationUrl(String state, String redirectUriParam) {
         String finalRedirectUri = redirectUriParam != null ? redirectUriParam : this.redirectUri;
 
-        log.info("Generating Facebook OAuth URL with state: {}", state);
-
-        return String.format(
-                "%s?client_id=%s&redirect_uri=%s&state=%s&scope=%s&response_type=code",
-                OAUTH_URL, appId, finalRedirectUri, state, SCOPES
-        );
+        return UriComponentsBuilder.fromHttpUrl(OAUTH_URL)
+                .queryParam("client_id", appId)
+                .queryParam("redirect_uri", finalRedirectUri)
+                .queryParam("scope", PERMISSIONS)
+                .queryParam("state", state)
+                .build()
+                .toUriString();
     }
 
-    /**
-     * Exchange OAuth authorization code for access token
-     * Includes automatic upgrade to long-lived token (60 days)
-     *
-     * @param code Authorization code from OAuth callback
-     * @param redirectUri Redirect URI used in authorization request
-     * @return OAuth token response with access token and expiration
-     * @throws PlatformIntegrationException if token exchange fails
-     */
     @Override
     public OAuthTokenResponse exchangeCodeForToken(String code, String redirectUri)
             throws PlatformIntegrationException {
-
-        log.info("Exchanging Facebook OAuth code for access token");
-
         try {
             // Step 1: Exchange code for short-lived token
-            String shortLivedTokenUrl = String.format(
-                    "%s?client_id=%s&client_secret=%s&redirect_uri=%s&code=%s",
-                    TOKEN_URL, appId, appSecret, redirectUri, code
-            );
+            String url = UriComponentsBuilder.fromHttpUrl(TOKEN_URL)
+                    .queryParam("client_id", appId)
+                    .queryParam("client_secret", appSecret)
+                    .queryParam("redirect_uri", redirectUri)
+                    .queryParam("code", code)
+                    .build()
+                    .toUriString();
 
-            ResponseEntity<Map> shortTokenResponse = restTemplate.getForEntity(
-                    shortLivedTokenUrl, Map.class
-            );
+            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
 
-            if (!shortTokenResponse.getStatusCode().is2xxSuccessful() || shortTokenResponse.getBody() == null) {
-                throw new PlatformIntegrationException("Failed to exchange Facebook code for token");
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+                throw new PlatformIntegrationException("Failed to exchange code for token");
             }
 
-            String shortLivedToken = (String) shortTokenResponse.getBody().get("access_token");
-            log.debug("Received short-lived Facebook token");
+            JsonNode tokenData = objectMapper.readTree(response.getBody());
+            String shortLivedToken = tokenData.get("access_token").asText();
 
             // Step 2: Exchange short-lived token for long-lived token (60 days)
-            String longLivedTokenUrl = String.format(
-                    "%s?grant_type=fb_exchange_token&client_id=%s&client_secret=%s&fb_exchange_token=%s",
-                    TOKEN_URL, appId, appSecret, shortLivedToken
-            );
+            String longLivedUrl = UriComponentsBuilder.fromHttpUrl(TOKEN_EXCHANGE_URL)
+                    .queryParam("grant_type", "fb_exchange_token")
+                    .queryParam("client_id", appId)
+                    .queryParam("client_secret", appSecret)
+                    .queryParam("fb_exchange_token", shortLivedToken)
+                    .build()
+                    .toUriString();
 
-            ResponseEntity<Map> longTokenResponse = restTemplate.getForEntity(
-                    longLivedTokenUrl, Map.class
-            );
+            ResponseEntity<String> longLivedResponse = restTemplate.getForEntity(longLivedUrl, String.class);
 
-            if (!longTokenResponse.getStatusCode().is2xxSuccessful() || longTokenResponse.getBody() == null) {
-                log.warn("Failed to get long-lived token, using short-lived token");
-                return buildTokenResponse(shortTokenResponse.getBody());
+            if (!longLivedResponse.getStatusCode().is2xxSuccessful() || longLivedResponse.getBody() == null) {
+                throw new PlatformIntegrationException("Failed to get long-lived token");
             }
 
-            Map<String, Object> tokenData = longTokenResponse.getBody();
-            log.info("Successfully obtained long-lived Facebook token (expires in {} seconds)",
-                    tokenData.get("expires_in"));
+            JsonNode longLivedData = objectMapper.readTree(longLivedResponse.getBody());
+            String accessToken = longLivedData.get("access_token").asText();
+            int expiresIn = longLivedData.has("expires_in") ?
+                    longLivedData.get("expires_in").asInt() : 5184000; // Default 60 days
 
-            return buildTokenResponse(tokenData);
+            log.info("Successfully obtained Facebook long-lived token (expires in {} seconds)", expiresIn);
 
-        } catch (HttpClientErrorException e) {
-            log.error("Facebook OAuth error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new PlatformIntegrationException(
-                    "Facebook OAuth failed: " + e.getMessage(), e
-            );
-        } catch (Exception e) {
-            log.error("Unexpected error during Facebook token exchange", e);
-            throw new PlatformIntegrationException(
-                    "Facebook OAuth failed: " + e.getMessage(), e
-            );
-        }
-    }
-
-    /**
-     * Fetch reviews from Facebook page
-     *
-     * Process:
-     * 1. Get user's Facebook pages
-     * 2. Exchange user token for page access token
-     * 3. Fetch ratings/reviews using page token
-     *
-     * @param credential OAuth credentials containing access token
-     * @param sinceDate Only fetch reviews after this date (null = all reviews)
-     * @return List of reviews from Facebook page
-     * @throws PlatformIntegrationException if fetch fails
-     */
-    @Override
-    public List<PlatformReviewDto> fetchReviews(ChannelCredential credential, OffsetDateTime sinceDate)
-            throws PlatformIntegrationException {
-
-        log.info("Fetching Facebook reviews for business {}",
-                credential.getBusiness() != null ? credential.getBusiness().getId() : "unknown");
-
-        try {
-            // Step 1: Get user's Facebook pages
-            List<Map<String, Object>> pages = getUserPages(credential.getAccessToken());
-
-            if (pages == null || pages.isEmpty()) {
-                log.warn("No Facebook pages found for user");
-                return Collections.emptyList();
-            }
-
-            // Step 2: Get page from metadata or use first page
-            String targetPageId = getStoredPageId(credential);
-            Map<String, Object> targetPage = targetPageId != null
-                    ? findPageById(pages, targetPageId)
-                    : pages.get(0);
-
-            if (targetPage == null) {
-                log.warn("Could not find target Facebook page");
-                return Collections.emptyList();
-            }
-
-            String pageId = (String) targetPage.get("id");
-            String pageAccessToken = (String) targetPage.get("access_token");
-
-            log.info("Fetching reviews for Facebook page: {} ({})",
-                    targetPage.get("name"), pageId);
-
-            // Store page info in metadata for future syncs
-            updateCredentialWithPageInfo(credential, targetPage);
-
-            // Step 3: Fetch ratings using page access token
-            return fetchPageRatings(pageId, pageAccessToken, sinceDate);
-
-        } catch (HttpClientErrorException e) {
-            log.error("Facebook API error: {} - {}",
-                    e.getStatusCode(), e.getResponseBodyAsString());
-            throw new PlatformIntegrationException(
-                    "Failed to fetch Facebook reviews: " + e.getMessage(), e
-            );
-        } catch (Exception e) {
-            log.error("Unexpected error fetching Facebook reviews", e);
-            throw new PlatformIntegrationException(
-                    "Failed to fetch Facebook reviews: " + e.getMessage(), e
-            );
-        }
-    }
-
-    /**
-     * Get user's Facebook pages with access tokens
-     */
-    private List<Map<String, Object>> getUserPages(String userAccessToken)
-            throws PlatformIntegrationException {
-
-        // Step 1: Try normal /me/accounts (works for app-level permissions)
-        String pagesUrl = String.format(
-                "%s/me/accounts?fields=id,name,access_token,category&access_token=%s",
-                GRAPH_API_URL, userAccessToken
-        );
-
-        log.info("Calling Facebook /me/accounts endpoint");
-
-        ResponseEntity<Map> response = restTemplate.getForEntity(pagesUrl, Map.class);
-
-        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
-            throw new PlatformIntegrationException("Failed to fetch Facebook pages");
-        }
-
-        log.info("Facebook /me/accounts response: {}", response.getBody());
-
-        List<Map<String, Object>> pages = (List<Map<String, Object>>) response.getBody().get("data");
-
-        // Step 2: If empty, extract page IDs from token granular scopes
-        if (pages == null || pages.isEmpty()) {
-            log.warn("No pages from /me/accounts (likely granular permissions). Extracting page IDs from token...");
-            pages = getPagesByIntrospectingToken(userAccessToken);
-        }
-
-        if (pages != null && !pages.isEmpty()) {
-            log.info("Found {} Facebook pages", pages.size());
-            for (Map<String, Object> page : pages) {
-                log.info("  - Page: {} (ID: {})", page.get("name"), page.get("id"));
-            }
-        } else {
-            log.warn("Facebook returned no accessible pages");
-        }
-
-        return pages;
-    }
-
-    /**
-     * Extract page IDs from token's granular scopes when /me/accounts fails
-     * This works for ANY user with granular (page-specific) permissions
-     */
-    private List<Map<String, Object>> getPagesByIntrospectingToken(String userAccessToken) {
-        try {
-            // Step 1: Introspect the token to get granular scopes
-            String debugUrl = String.format(
-                    "%s/debug_token?input_token=%s&access_token=%s|%s",
-                    GRAPH_API_URL, userAccessToken, appId, appSecret
-            );
-
-            log.info("Introspecting token to find page IDs from granular scopes");
-            ResponseEntity<Map> debugResponse = restTemplate.getForEntity(debugUrl, Map.class);
-
-            if (!debugResponse.getStatusCode().is2xxSuccessful() || debugResponse.getBody() == null) {
-                log.warn("Token introspection failed");
-                return null;
-            }
-
-            Map<String, Object> data = (Map<String, Object>) debugResponse.getBody().get("data");
-            List<Map<String, Object>> granularScopes = (List<Map<String, Object>>) data.get("granular_scopes");
-
-            if (granularScopes == null || granularScopes.isEmpty()) {
-                log.warn("No granular scopes found in token");
-                return null;
-            }
-
-            log.info("Found granular scopes: {}", granularScopes);
-
-            // Step 2: Extract unique page IDs from granular scopes
-            Set<String> pageIds = new HashSet<>();
-            for (Map<String, Object> scope : granularScopes) {
-                List<String> targetIds = (List<String>) scope.get("target_ids");
-                if (targetIds != null) {
-                    pageIds.addAll(targetIds);
-                }
-            }
-
-            if (pageIds.isEmpty()) {
-                log.warn("No page IDs found in granular scopes");
-                return null;
-            }
-
-            log.info("Extracted page IDs from token: {}", pageIds);
-
-            // Step 3: Fetch page details for each ID
-            List<Map<String, Object>> pages = new ArrayList<>();
-            for (String pageId : pageIds) {
-                try {
-                    Map<String, Object> pageData = getPageAccessToken(pageId, userAccessToken);
-                    if (pageData != null) {
-                        pages.add(pageData);
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to get access token for page {}: {}", pageId, e.getMessage());
-                }
-            }
-
-            return pages.isEmpty() ? null : pages;
+            return OAuthTokenResponse.builder()
+                    .accessToken(accessToken)
+                    .refreshToken(null) // Facebook doesn't use refresh tokens
+                    .expiresIn(expiresIn)
+                    .tokenType("bearer")
+                    .build();
 
         } catch (Exception e) {
-            log.error("Failed to extract pages from token introspection", e);
-            return null;
+            log.error("Error exchanging Facebook OAuth code", e);
+            throw new PlatformIntegrationException("Facebook OAuth exchange failed: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Get page access token for a specific page ID
-     * This is used when we have granular permissions
-     */
-    private Map<String, Object> getPageAccessToken(String pageId, String userAccessToken) {
-        try {
-            // Get page details including its access token
-            String pageUrl = String.format(
-                    "%s/%s?fields=id,name,access_token,category&access_token=%s",
-                    GRAPH_API_URL, pageId, userAccessToken
-            );
+    // ========================================
+    // UPDATED: Automatic token extension implementation
+    // ========================================
 
-            log.info("Fetching page access token for page: {}", pageId);
-            ResponseEntity<Map> pageResponse = restTemplate.getForEntity(pageUrl, Map.class);
-
-            if (pageResponse.getStatusCode().is2xxSuccessful() && pageResponse.getBody() != null) {
-                log.info("Successfully retrieved access token for page {}", pageId);
-                return pageResponse.getBody();
-            }
-
-        } catch (Exception e) {
-            log.error("Failed to get page access token for {}: {}", pageId, e.getMessage());
-        }
-
-        return null;
-    }
-
-    /**
-     * Fetch ratings/reviews for a specific page
-     */
-    private List<PlatformReviewDto> fetchPageRatings(
-            String pageId,
-            String pageAccessToken,
-            OffsetDateTime sinceDate) throws PlatformIntegrationException {
-
-        // Facebook ratings endpoint with all required fields
-        String ratingsUrl = String.format(
-                "%s/%s/ratings?fields=reviewer,rating,review_text,created_time,open_graph_story,recommendation_type&limit=100&access_token=%s",
-                GRAPH_API_URL, pageId, pageAccessToken
-        );
-
-        // Add since parameter if provided
-        if (sinceDate != null) {
-            long sinceTimestamp = sinceDate.toEpochSecond();
-            ratingsUrl += "&since=" + sinceTimestamp;
-        }
-
-        log.debug("Fetching ratings from: {}", ratingsUrl.replace(pageAccessToken, "***"));
-
-        ResponseEntity<Map> response = restTemplate.getForEntity(ratingsUrl, Map.class);
-
-        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
-            throw new PlatformIntegrationException("Failed to fetch Facebook ratings");
-        }
-
-        List<Map<String, Object>> ratings = (List<Map<String, Object>>)
-                response.getBody().get("data");
-
-        if (ratings == null || ratings.isEmpty()) {
-            log.info("No Facebook ratings found for page {}", pageId);
-            return Collections.emptyList();
-        }
-
-        List<PlatformReviewDto> reviews = new ArrayList<>();
-        for (Map<String, Object> rating : ratings) {
-            try {
-                reviews.add(parseFacebookRating(rating, pageId));
-            } catch (Exception e) {
-                log.warn("Failed to parse Facebook rating: {}", e.getMessage());
-                // Continue processing other ratings
-            }
-        }
-
-        log.info("Successfully fetched {} Facebook reviews", reviews.size());
-        return reviews;
-    }
-
-    /**
-     * Parse Facebook rating into standardized review DTO
-     */
-    private PlatformReviewDto parseFacebookRating(Map<String, Object> data, String pageId) {
-        Map<String, Object> reviewer = (Map<String, Object>) data.get("reviewer");
-
-        // Facebook rating is 1-5, sometimes includes recommendation_type
-        Integer rating = (Integer) data.get("rating");
-        String recommendationType = (String) data.get("recommendation_type");
-
-        // Handle recommendation_type (positive/negative) if rating is null
-        if (rating == null && recommendationType != null) {
-            rating = "positive".equalsIgnoreCase(recommendationType) ? 5 : 1;
-        }
-
-        String reviewId = (String) data.get("id");
-        String reviewUrl = String.format("https://facebook.com/%s/reviews", pageId);
-
-        return PlatformReviewDto.builder()
-                .platformReviewId(reviewId)
-                .reviewerName(reviewer != null ? (String) reviewer.get("name") : "Facebook User")
-                .reviewerPhotoUrl(buildFacebookPhotoUrl(reviewer))
-                .rating(rating != null ? rating : 0)
-                .comment((String) data.get("review_text"))
-                .reviewUrl(reviewUrl)
-                .createdAt(parseFacebookTimestamp((String) data.get("created_time")))
-                .updatedAt(parseFacebookTimestamp((String) data.get("created_time")))
-                .isPlatformVerified(true)
-                .metadata(buildMetadata(data))
-                .build();
-    }
-
-    /**
-     * Build Facebook profile photo URL
-     */
-    private String buildFacebookPhotoUrl(Map<String, Object> reviewer) {
-        if (reviewer == null) return null;
-
-        String reviewerId = (String) reviewer.get("id");
-        if (reviewerId == null) return null;
-
-        return String.format("%s/%s/picture?type=square", GRAPH_API_URL, reviewerId);
-    }
-
-    /**
-     * Parse Facebook ISO 8601 timestamp
-     */
-    private OffsetDateTime parseFacebookTimestamp(String timestamp) {
-        if (timestamp == null) return OffsetDateTime.now(ZoneOffset.UTC);
-
-        try {
-            // Facebook returns format: "2024-01-15T10:30:00+0000"
-            // Need to convert +0000 to +00:00 for proper parsing
-            String normalizedTimestamp = timestamp.replaceAll("(\\+\\d{2})(\\d{2})$", "$1:$2");
-            return OffsetDateTime.parse(normalizedTimestamp);
-        } catch (Exception e) {
-            log.warn("Failed to parse Facebook timestamp: {}", timestamp);
-            return OffsetDateTime.now(ZoneOffset.UTC);
-        }
-    }
-
-    /**
-     * Build metadata map for additional platform info
-     */
-    private Map<String, Object> buildMetadata(Map<String, Object> ratingData) {
-        Map<String, Object> metadata = new HashMap<>();
-
-        if (ratingData.get("open_graph_story") != null) {
-            metadata.put("open_graph_story_id", ratingData.get("open_graph_story"));
-        }
-
-        if (ratingData.get("recommendation_type") != null) {
-            metadata.put("recommendation_type", ratingData.get("recommendation_type"));
-        }
-
-        return metadata;
-    }
-
-    /**
-     * Post a response to a Facebook review
-     * Note: Requires pages_manage_engagement permission
-     */
-    @Override
-    public void postReviewResponse(ChannelCredential credential, String reviewId, String responseText)
-            throws PlatformIntegrationException {
-
-        log.info("Posting response to Facebook review: {}", reviewId);
-
-        try {
-            String pageAccessToken = getPageAccessToken(credential);
-
-            String commentUrl = String.format(
-                    "%s/%s/comments?access_token=%s",
-                    GRAPH_API_URL, reviewId, pageAccessToken
-            );
-
-            Map<String, String> commentBody = new HashMap<>();
-            commentBody.put("message", responseText);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, String>> request = new HttpEntity<>(commentBody, headers);
-
-            ResponseEntity<Map> response = restTemplate.postForEntity(commentUrl, request, Map.class);
-
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new PlatformIntegrationException("Failed to post Facebook review response");
-            }
-
-            log.info("Successfully posted response to Facebook review {}", reviewId);
-
-        } catch (Exception e) {
-            log.error("Failed to post Facebook review response", e);
-            throw new PlatformIntegrationException(
-                    "Failed to post review response: " + e.getMessage(), e
-            );
-        }
-    }
-
-    /**
-     * Validate credentials by making a test API call
-     */
-    @Override
-    public boolean validateCredentials(ChannelCredential credential) {
-        try {
-            String debugUrl = String.format(
-                    "%s/me?access_token=%s",
-                    GRAPH_API_URL, credential.getAccessToken()
-            );
-
-            ResponseEntity<Map> response = restTemplate.getForEntity(debugUrl, Map.class);
-
-            boolean isValid = response.getStatusCode().is2xxSuccessful()
-                    && response.getBody() != null
-                    && response.getBody().get("id") != null;
-
-            log.info("Facebook credential validation: {}", isValid ? "SUCCESS" : "FAILED");
-            return isValid;
-
-        } catch (Exception e) {
-            log.warn("Facebook credential validation failed: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Refresh Facebook access token
-     * Note: Facebook long-lived tokens (60 days) can be refreshed before expiration
-     */
     @Override
     public ChannelCredential refreshToken(ChannelCredential credential)
             throws PlatformIntegrationException {
 
-        log.info("Refreshing Facebook access token for credential {}", credential.getId());
+        log.info("Extending Facebook token for credential {}", credential.getId());
 
         try {
-            String refreshUrl = String.format(
-                    "%s?grant_type=fb_exchange_token&client_id=%s&client_secret=%s&fb_exchange_token=%s",
-                    TOKEN_URL, appId, appSecret, credential.getAccessToken()
-            );
+            // Facebook uses token extension (not refresh)
+            // This extends the token back to 60 days
+            String url = UriComponentsBuilder.fromHttpUrl(TOKEN_EXCHANGE_URL)
+                    .queryParam("grant_type", "fb_exchange_token")
+                    .queryParam("client_id", appId)
+                    .queryParam("client_secret", appSecret)
+                    .queryParam("fb_exchange_token", credential.getAccessToken())
+                    .build()
+                    .toUriString();
 
-            ResponseEntity<Map> response = restTemplate.getForEntity(refreshUrl, Map.class);
+            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
 
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
-                throw new PlatformIntegrationException("Failed to refresh Facebook token");
+                throw new PlatformIntegrationException("Token extension failed");
             }
 
-            Map<String, Object> tokenData = response.getBody();
+            JsonNode tokenData = objectMapper.readTree(response.getBody());
+            String newAccessToken = tokenData.get("access_token").asText();
+            int expiresIn = tokenData.has("expires_in") ?
+                    tokenData.get("expires_in").asInt() : 5184000; // Default 60 days
 
-            credential.setAccessToken((String) tokenData.get("access_token"));
+            // Update credential with extended token
+            credential.setAccessToken(newAccessToken);
+            credential.setTokenExpiresAt(
+                    OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(expiresIn)
+            );
+            credential.setStatus(ChannelCredential.CredentialStatus.ACTIVE);
+            credential.setSyncErrorMessage(null);
 
-            Integer expiresIn = (Integer) tokenData.get("expires_in");
-            if (expiresIn != null) {
-                credential.setTokenExpiresAt(
-                        OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(expiresIn)
-                );
-            }
+            log.info("Successfully extended Facebook token for credential {} (new expiry in {} days)",
+                    credential.getId(), expiresIn / 86400);
 
-            log.info("Successfully refreshed Facebook token (expires in {} seconds)", expiresIn);
             return credential;
 
-        } catch (Exception e) {
-            log.error("Failed to refresh Facebook token", e);
-            throw new PlatformIntegrationException(
-                    "Token refresh failed: " + e.getMessage(), e
+        } catch (HttpClientErrorException e) {
+            log.error("Facebook token extension failed: {}", e.getMessage());
+
+            // Mark credential as expired
+            credential.setStatus(ChannelCredential.CredentialStatus.EXPIRED);
+            credential.setSyncErrorMessage("Token extension failed. Please reconnect.");
+
+            throw new TokenExpiredException(
+                    credential.getPlatformType().name(),
+                    credential.getId(),
+                    "Facebook access has expired. Please reconnect.",
+                    e
             );
+
+        } catch (Exception e) {
+            log.error("Unexpected error extending Facebook token", e);
+            throw new PlatformIntegrationException("Token extension error: " + e.getMessage(), e);
         }
     }
 
-    // ============ Helper Methods ============
+    @Override
+    public List<PlatformReviewDto> fetchReviews(ChannelCredential credential, OffsetDateTime sinceDate)
+            throws PlatformIntegrationException {
 
-    private OAuthTokenResponse buildTokenResponse(Map<String, Object> tokenData) {
-        return OAuthTokenResponse.builder()
-                .accessToken((String) tokenData.get("access_token"))
-                .refreshToken(null) // Facebook doesn't provide refresh tokens
-                .expiresIn((Integer) tokenData.getOrDefault("expires_in", 5184000)) // Default 60 days
-                .tokenType((String) tokenData.getOrDefault("token_type", "bearer"))
-                .scope((String) tokenData.get("scope"))
+        try {
+            // Get page ID from metadata
+            String pageId = getPageIdFromCredential(credential);
+            if (pageId == null) {
+                log.warn("No Facebook page ID found in credential metadata");
+                return Collections.emptyList();
+            }
+
+            log.info("Fetching Facebook reviews for page: {}", pageId);
+
+            // Fetch ratings/reviews from Facebook Graph API
+            List<PlatformReviewDto> apiReviews = fetchReviewsFromGraphAPI(credential.getAccessToken(), pageId);
+
+            // Scrape reviewer names from public page (Graph API doesn't provide names)
+            String pageUrl = getPageUrlFromCredential(credential);
+            if (pageUrl != null) {
+                enrichReviewsWithScrapedNames(apiReviews, pageUrl);
+            }
+
+            log.info("Fetched {} Facebook reviews", apiReviews.size());
+            return apiReviews;
+
+        } catch (Exception e) {
+            log.error("Error fetching Facebook reviews", e);
+            throw new PlatformIntegrationException("Failed to fetch Facebook reviews: " + e.getMessage(), e);
+        }
+    }
+
+    private List<PlatformReviewDto> fetchReviewsFromGraphAPI(String accessToken, String pageId)
+            throws PlatformIntegrationException {
+        try {
+            String url = String.format("%s/%s/ratings", GRAPH_API_BASE, pageId);
+
+            url = UriComponentsBuilder.fromHttpUrl(url)
+                    .queryParam("access_token", accessToken)
+                    .queryParam("fields", "created_time,rating,review_text,reviewer")
+                    .queryParam("limit", "100")
+                    .build()
+                    .toUriString();
+
+            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+
+            if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+                throw new PlatformIntegrationException("Failed to fetch Facebook ratings");
+            }
+
+            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode data = root.get("data");
+
+            if (data == null || !data.isArray()) {
+                return Collections.emptyList();
+            }
+
+            List<PlatformReviewDto> reviews = new ArrayList<>();
+
+            for (JsonNode rating : data) {
+                try {
+                    PlatformReviewDto review = parseFacebookRating(rating);
+                    reviews.add(review);
+                } catch (Exception e) {
+                    log.warn("Failed to parse Facebook rating: {}", e.getMessage());
+                }
+            }
+
+            return reviews;
+
+        } catch (Exception e) {
+            throw new PlatformIntegrationException("Graph API request failed: " + e.getMessage(), e);
+        }
+    }
+
+    private PlatformReviewDto parseFacebookRating(JsonNode rating) {
+        String reviewId = rating.has("id") ? rating.get("id").asText() : UUID.randomUUID().toString();
+        int ratingValue = rating.has("rating") ? rating.get("rating").asInt() : 0;
+        String reviewText = rating.has("review_text") ? rating.get("review_text").asText() : null;
+
+        // Parse created_time
+        OffsetDateTime createdAt = OffsetDateTime.now();
+        if (rating.has("created_time")) {
+            try {
+                long timestamp = rating.get("created_time").asLong();
+                createdAt = OffsetDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneOffset.UTC);
+            } catch (Exception e) {
+                log.warn("Failed to parse Facebook timestamp");
+            }
+        }
+
+        // Reviewer info (limited from Graph API)
+        String reviewerName = "Facebook User"; // Default (will be enriched by scraping)
+        if (rating.has("reviewer") && rating.get("reviewer").has("name")) {
+            reviewerName = rating.get("reviewer").get("name").asText();
+        }
+
+        return PlatformReviewDto.builder()
+                .platformReviewId(reviewId)
+                .reviewerName(reviewerName)
+                .rating(ratingValue)
+                .comment(reviewText)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .isPlatformVerified(false)
                 .build();
     }
 
-    private String getStoredPageId(ChannelCredential credential) {
+    private void enrichReviewsWithScrapedNames(List<PlatformReviewDto> reviews, String pageUrl) {
         try {
-            Map<String, Object> metadata = credential.getMetadata();
-            if (metadata != null && metadata.get("pageId") != null) {
-                return (String) metadata.get("pageId");
-            }
-        } catch (Exception e) {
-            log.debug("No stored page ID in metadata");
-        }
-        return null;
-    }
+            log.info("Scraping Facebook page for reviewer names: {}", pageUrl);
 
-    private Map<String, Object> findPageById(List<Map<String, Object>> pages, String pageId) {
-        return pages.stream()
-                .filter(page -> pageId.equals(page.get("id")))
-                .findFirst()
-                .orElse(null);
-    }
+            Document doc = Jsoup.connect(pageUrl + "/reviews")
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .timeout(10000)
+                    .get();
 
-    private void updateCredentialWithPageInfo(
-            ChannelCredential credential,
-            Map<String, Object> page) {
+            Elements reviewElements = doc.select("div[data-ad-comet-preview]");
+            log.info("Found {} review elements on page", reviewElements.size());
 
-        try {
-            Map<String, Object> metadata = credential.getMetadata();
-            if (metadata == null) {
-                metadata = new HashMap<>();
+            int index = 0;
+            for (Element reviewEl : reviewElements) {
+                if (index >= reviews.size()) break;
+
+                String reviewerName = reviewEl.select("a[role='link'] strong").text();
+                if (reviewerName != null && !reviewerName.isEmpty()) {
+                    reviews.get(index).setReviewerName(reviewerName);
+                    log.debug("Enriched review {} with name: {}", index, reviewerName);
+                }
+
+                index++;
             }
 
-            metadata.put("pageId", page.get("id"));
-            metadata.put("pageName", page.get("name"));
-            metadata.put("pageCategory", page.get("category"));
-
-            credential.setMetadata(metadata);
-
         } catch (Exception e) {
-            log.warn("Failed to update credential with page info", e);
+            log.warn("Failed to scrape Facebook reviewer names: {}", e.getMessage());
         }
     }
 
-    private String getPageAccessToken(ChannelCredential credential)
+    private String getPageIdFromCredential(ChannelCredential credential) {
+        if (credential.getMetadata() == null) return null;
+        Object pageId = credential.getMetadata().get("pageId");
+        return pageId != null ? pageId.toString() : null;
+    }
+
+    private String getPageUrlFromCredential(ChannelCredential credential) {
+        if (credential.getMetadata() == null) return null;
+        Object pageUrl = credential.getMetadata().get("pageUrl");
+        return pageUrl != null ? pageUrl.toString() : null;
+    }
+
+    @Override
+    public void postReviewResponse(ChannelCredential credential, String reviewId, String responseText)
             throws PlatformIntegrationException {
+        log.warn("Facebook review response not yet implemented");
+        throw new PlatformIntegrationException("Review response not yet configured");
+    }
 
-        Map<String, Object> metadata = credential.getMetadata();
-        if (metadata != null && metadata.get("pageAccessToken") != null) {
-            return (String) metadata.get("pageAccessToken");
+    @Override
+    public boolean validateCredentials(ChannelCredential credential) {
+        try {
+            String pageId = getPageIdFromCredential(credential);
+            if (pageId == null) return false;
+
+            String url = String.format("%s/%s", GRAPH_API_BASE, pageId);
+            url = UriComponentsBuilder.fromHttpUrl(url)
+                    .queryParam("access_token", credential.getAccessToken())
+                    .queryParam("fields", "id,name")
+                    .build()
+                    .toUriString();
+
+            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
+            return response.getStatusCode().is2xxSuccessful();
+
+        } catch (Exception e) {
+            return false;
         }
-
-        throw new PlatformIntegrationException(
-                "No page access token found. Please reconnect Facebook."
-        );
     }
 }
