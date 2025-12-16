@@ -1,5 +1,6 @@
 package com.reputul.backend.services;
 
+import com.reputul.backend.exceptions.TokenExpiredException;
 import com.reputul.backend.integrations.*;
 import com.reputul.backend.models.*;
 import com.reputul.backend.repositories.*;
@@ -73,6 +74,8 @@ public class ReviewSyncService {
 
     /**
      * Sync reviews from a single platform
+     *
+     * UPDATED: Includes automatic token refresh/extension before syncing
      */
     @Transactional
     public ReviewSyncJob syncPlatformReviews(ChannelCredential credential, Business business) {
@@ -91,6 +94,11 @@ public class ReviewSyncService {
             job.setStatus(ReviewSyncJob.SyncStatus.RUNNING);
             job.setStartedAt(OffsetDateTime.now(ZoneOffset.UTC));
             job = syncJobRepository.save(job);
+
+            // ========================================
+            // UPDATED: Check token and refresh/extend if needed
+            // ========================================
+            credential = ensureValidToken(credential);
 
             // Get platform client
             PlatformReviewClient client = platformClients.get(credential.getPlatformType());
@@ -148,6 +156,20 @@ public class ReviewSyncService {
             log.info("Sync completed for business {} on {}: {} new, {} updated, {} skipped",
                     business.getId(), credential.getPlatformType(), newCount, updatedCount, skippedCount);
 
+        } catch (TokenExpiredException e) {
+            // Token expired and cannot be refreshed - let it propagate to controller
+            log.error("Token expired for credential {}: {}", credential.getId(), e.getMessage());
+            job.setStatus(ReviewSyncJob.SyncStatus.FAILED);
+            job.setErrorMessage(e.getMessage());
+            job.setCompletedAt(OffsetDateTime.now(ZoneOffset.UTC));
+
+            // Save the updated credential status
+            credentialRepository.save(credential);
+            syncJobRepository.save(job);
+
+            // Re-throw to be caught by controller
+            throw e;
+
         } catch (Exception e) {
             log.error("Sync job failed", e);
             job.setStatus(ReviewSyncJob.SyncStatus.FAILED);
@@ -162,6 +184,75 @@ public class ReviewSyncService {
         }
 
         return syncJobRepository.save(job);
+    }
+
+    /**
+     * UPDATED: Ensure token is valid, refresh/extend if needed
+     *
+     * Strategy:
+     * - Google: Auto-refresh using refresh token if expired or expiring soon (within 5 min)
+     * - Facebook: Auto-extend if token expires within 7 days (proactive extension)
+     *
+     * @param credential The credential to check
+     * @return Updated credential with fresh token
+     * @throws TokenExpiredException if token cannot be refreshed/extended
+     * @throws PlatformIntegrationException if platform client is unavailable or other errors occur
+     */
+    private ChannelCredential ensureValidToken(ChannelCredential credential)
+            throws TokenExpiredException, PlatformIntegrationException {
+
+        // Check if token needs refresh/extension
+        if (!credential.needsRefresh()) {
+            log.debug("Token for credential {} is still valid", credential.getId());
+            return credential;
+        }
+
+        log.info("Token for credential {} needs refresh (expires at: {})",
+                credential.getId(), credential.getTokenExpiresAt());
+
+        // Get the platform client
+        PlatformReviewClient client = platformClients.get(credential.getPlatformType());
+        if (client == null) {
+            throw new PlatformIntegrationException(
+                    "No client available for platform: " + credential.getPlatformType());
+        }
+
+        try {
+            // Platform-specific token refresh/extension logic
+            if (credential.getPlatformType() == ChannelCredential.PlatformType.GOOGLE_MY_BUSINESS) {
+                // Google: Refresh token (uses refresh token to get new access token)
+                log.info("Refreshing Google token for credential {}", credential.getId());
+                credential = client.refreshToken(credential);
+
+            } else if (credential.getPlatformType() == ChannelCredential.PlatformType.FACEBOOK) {
+                // Facebook: Extend token (only if within 7 days of expiry)
+                OffsetDateTime sevenDaysFromNow = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7);
+
+                if (credential.getTokenExpiresAt() != null &&
+                        credential.getTokenExpiresAt().isBefore(sevenDaysFromNow)) {
+                    log.info("Extending Facebook token for credential {} (expires in <7 days)", credential.getId());
+                    credential = client.refreshToken(credential);
+                } else {
+                    log.debug("Facebook token for credential {} not yet due for extension", credential.getId());
+                    return credential;
+                }
+            }
+
+            // Save updated credential
+            credential = credentialRepository.save(credential);
+            log.info("Successfully refreshed/extended token for credential {}", credential.getId());
+
+            return credential;
+
+        } catch (TokenExpiredException e) {
+            // Token refresh/extension failed - credential needs reconnection
+            log.error("Token refresh failed for credential {}: {}", credential.getId(), e.getMessage());
+            throw e;
+
+        } catch (Exception e) {
+            log.error("Unexpected error during token refresh for credential {}", credential.getId(), e);
+            throw new PlatformIntegrationException("Token refresh failed: " + e.getMessage(), e);
+        }
     }
 
     /**

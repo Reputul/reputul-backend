@@ -101,6 +101,12 @@
 			<version>3.1.0</version>
 		</dependency>
 
+		<dependency>
+			<groupId>org.jsoup</groupId>
+			<artifactId>jsoup</artifactId>
+			<version>1.17.2</version>
+		</dependency>
+
 		<!-- Spring Boot Mail (optional, for backup SMTP) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
