@@ -14,7 +14,7 @@ import java.util.List;
 
 /**
  * Enhanced Reputation Service with Wilson Score Algorithm
- * Replaces simple averages with statistically sound confidence-based ratings
+ * FIXED: Uses weighted average for star ratings instead of binary positive rate
  */
 @Service
 @Slf4j
@@ -45,8 +45,8 @@ public class ReputationService {
     }
 
     /**
-     * NEW: Calculate Wilson Score-based Reputul Rating (0-5 stars)
-     * This is the public-facing rating that prevents small-sample bias
+     * FIXED: Calculate Wilson Score-based Reputul Rating (0-5 stars)
+     * Uses weighted average of actual star ratings with confidence adjustment
      */
     public double calculateReputulRating(Long businessId) {
         List<Review> reviews = reviewRepo.findByBusinessId(businessId);
@@ -57,7 +57,7 @@ public class ReputationService {
 
         OffsetDateTime now = OffsetDateTime.now();
         double totalWeightedReviews = 0.0;
-        double totalWeightedPositive = 0.0;
+        double totalWeightedRating = 0.0;
 
         // Apply recency weighting to each review
         for (Review review : reviews) {
@@ -65,29 +65,43 @@ public class ReputationService {
             double recencyWeight = Math.exp(-RECENCY_LAMBDA * ageDays);
 
             totalWeightedReviews += recencyWeight;
-
-            // Count 4-5 star reviews as "positive"
-            if (review.getRating() >= 4) {
-                totalWeightedPositive += recencyWeight;
-            }
+            totalWeightedRating += (review.getRating() * recencyWeight);
         }
 
         if (totalWeightedReviews == 0) {
             return 0.0;
         }
 
-        // Calculate Wilson Score Lower Bound
-        double positiveRate = totalWeightedPositive / totalWeightedReviews;
-        double wilsonLowerBound = calculateWilsonLowerBound(positiveRate, totalWeightedReviews);
+        // Calculate weighted average
+        double weightedAverage = totalWeightedRating / totalWeightedReviews;
 
-        // Convert from 0-1 (positive rate) back to 0-5 star scale
-        double reputulRating = wilsonLowerBound * 5.0;
+        // Apply confidence adjustment for small samples
+        // This prevents businesses with few perfect reviews from outranking established ones
+        double n = totalWeightedReviews;
+        double z = WILSON_CONFIDENCE;
 
-        return Math.max(0.0, Math.min(5.0, reputulRating));
+        // For star ratings (1-5), we calculate the uncertainty and adjust downward
+        // The variance of a rating between 1-5 is approximated by the spread from the mean
+        double maxRating = 5.0;
+        double variance = weightedAverage * (maxRating - weightedAverage) / maxRating;
+        double standardError = Math.sqrt(variance / n);
+        double marginOfError = z * standardError;
+
+        // Adjust rating downward by margin of error, accounting for sample size
+        double confidenceAdjustment = marginOfError / (1 + (z * z) / n);
+        double adjustedRating = weightedAverage - confidenceAdjustment;
+
+        // Ensure within bounds
+        double finalRating = Math.max(0.0, Math.min(5.0, adjustedRating));
+
+        log.debug("Business {}: {} reviews, weighted avg: {:.2f}, adjusted: {:.2f}",
+                businessId, reviews.size(), weightedAverage, finalRating);
+
+        return finalRating;
     }
 
     /**
-     * NEW: Calculate composite Reputation Score (0-100)
+     * Calculate composite Reputation Score (0-100)
      * 60% Quality + 25% Velocity + 15% Responsiveness
      */
     public double calculateCompositeReputationScore(Long businessId) {
@@ -104,15 +118,13 @@ public class ReputationService {
 
     /**
      * BACKWARD COMPATIBILITY: Keep the old method signature
-     * Now returns the composite reputation score (0-100)
      */
     public double getReputationScore(Long businessId) {
         return calculateCompositeReputationScore(businessId);
     }
 
     /**
-     * ENHANCED: Update all reputation metrics for a business
-     * This replaces the old updateBusinessReputationAndBadge method
+     * Update all reputation metrics for a business
      */
     @Transactional
     public void updateBusinessReputationAndBadge(Long businessId) {
@@ -137,8 +149,12 @@ public class ReputationService {
         // Update legacy reputation score for backward compatibility
         business.setReputationScore(compositeScore);
 
-        // Update badge based on new Wilson Score
-        String newBadge = badgeService.determineEnhancedBadge(reputulRating, Math.toIntExact(reviewRepo.countByBusinessId(businessId)));
+        // Update badge based on Wilson Score
+        String newBadge = badgeService.determineEnhancedBadgeWithActivity(
+                businessId,
+                reputulRating,
+                Math.toIntExact(reviewRepo.countByBusinessId(businessId))
+        );
         business.setBadge(newBadge);
 
         businessRepo.save(business);
@@ -236,7 +252,7 @@ public class ReputationService {
 
         // 1. Velocity component: reviews per 30 days vs baseline
         double reviewsPer30d = (reviewsLast90d / 90.0) * 30.0;
-        double industryBaseline = 3.0; // Default baseline, can be made configurable
+        double industryBaseline = 1.5; // Adjusted baseline for local services
         double velocityComponent = Math.min(1.0, reviewsPer30d / industryBaseline);
 
         // 2. Recency mix: share of last 90 days vs last 12 months
@@ -262,7 +278,7 @@ public class ReputationService {
     }
 
     /**
-     * NEW: Get detailed reputation breakdown for dashboard
+     * Get detailed reputation breakdown for dashboard
      */
     public ReputationBreakdown getReputationBreakdown(Long businessId) {
         List<Review> reviews = reviewRepo.findByBusinessId(businessId);

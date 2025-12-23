@@ -79,6 +79,13 @@ public class ChannelCredential {
     @JoinColumn(name = "created_by_user_id")
     private User createdBy;
 
+    @Column(name = "connection_method")
+    private String connectionMethod;
+
+    @Column(name = "display_order")
+    @Builder.Default
+    private Integer displayOrder = 0;
+
     @PrePersist
     protected void onCreate() {
         createdAt = OffsetDateTime.now(ZoneOffset.UTC);

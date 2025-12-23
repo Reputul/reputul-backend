@@ -10,6 +10,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -31,6 +33,9 @@ public class PlatformConnectionController {
     private final ReviewSyncService reviewSyncService;
     private final Map<ChannelCredential.PlatformType, PlatformReviewClient> platformClients;
 
+    private final RestTemplate restTemplate; // ← Add this field
+
+
     @Value("${google.oauth.redirect-uri}")
     private String googleRedirectUri;
 
@@ -45,7 +50,8 @@ public class PlatformConnectionController {
             BusinessRepository businessRepository,
             UserRepository userRepository,
             ReviewSyncService reviewSyncService,
-            List<PlatformReviewClient> clients) {
+            List<PlatformReviewClient> clients,
+            RestTemplate restTemplate) {
 
         this.credentialRepository = credentialRepository;
         this.businessRepository = businessRepository;
@@ -55,8 +61,7 @@ public class PlatformConnectionController {
                 .collect(Collectors.toMap(
                         PlatformReviewClient::getPlatformType,
                         c -> c));
-
-        log.info("PlatformConnectionController initialized with {} platform clients", platformClients.size());
+        this.restTemplate = restTemplate;
     }
 
     /**
@@ -175,6 +180,7 @@ public class PlatformConnectionController {
 
     /**
      * Handle OAuth callback for Facebook
+     * UPDATED: Improved error logging and page fetching
      *
      * @param callbackData Code and state from OAuth provider
      * @param authentication Current user authentication
@@ -185,12 +191,229 @@ public class PlatformConnectionController {
             @RequestBody Map<String, String> callbackData,
             Authentication authentication) {
 
-        return handleOAuthCallback(
-                callbackData,
-                authentication,
-                ChannelCredential.PlatformType.FACEBOOK,
-                facebookRedirectUri
-        );
+        try {
+            String code = callbackData.get("code");
+            String state = callbackData.get("state");
+
+            log.info("🔵 Received Facebook OAuth callback - code: {}, state: {}",
+                    code != null ? "present" : "missing", state);
+
+            if (code == null || state == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "error", "Missing code or state"));
+            }
+
+            // Find pending credential by state token
+            Optional<ChannelCredential> credOpt = credentialRepository.findByMetadataContaining(state);
+
+            if (!credOpt.isPresent()) {
+                log.error("❌ No credential found for state: {}", state);
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "error", "Invalid state - credential not found. Please try connecting again."));
+            }
+
+            ChannelCredential credential = credOpt.get();
+
+            // Verify the credential is still PENDING
+            if (credential.getStatus() != ChannelCredential.CredentialStatus.PENDING) {
+                log.error("❌ Credential found but status is {} (expected PENDING)", credential.getStatus());
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "error", "Invalid credential state. Please try connecting again."));
+            }
+
+            // Verify the credential belongs to the authenticated user's organization
+            User user = getUserFromAuth(authentication);
+            if (!credential.getOrganization().getId().equals(user.getOrganization().getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("success", false, "error", "Not authorized"));
+            }
+
+            // Verify platform type matches
+            if (!credential.getPlatformType().equals(ChannelCredential.PlatformType.FACEBOOK)) {
+                log.error("❌ Platform type mismatch: expected FACEBOOK, got {}",
+                        credential.getPlatformType());
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "error", "Platform type mismatch. Please try connecting again."));
+            }
+
+            // Get Facebook client
+            FacebookClient facebookClient = (FacebookClient) platformClients.get(ChannelCredential.PlatformType.FACEBOOK);
+            if (facebookClient == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("success", false, "error", "Facebook client not available"));
+            }
+
+            // Exchange authorization code for access token (gets long-lived token)
+            log.info("🔄 Exchanging code for Facebook access token");
+            OAuthTokenResponse tokenResponse = facebookClient.exchangeCodeForToken(code, facebookRedirectUri);
+
+            // ========================================
+            // Fetch Facebook pages and get page access token
+            // ========================================
+            String userAccessToken = tokenResponse.getAccessToken();
+            log.info("✅ Got user access token (length: {})", userAccessToken.length());
+
+            try {
+                // Get user's Facebook pages
+                String pagesUrl = String.format(
+                        "https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token,category&access_token=%s",
+                        userAccessToken
+                );
+
+                log.info("📡 Fetching Facebook pages from Graph API");
+                ResponseEntity<String> pagesResponse = restTemplate.getForEntity(pagesUrl, String.class);
+
+                log.info("📥 Facebook API response status: {}", pagesResponse.getStatusCode());
+                log.info("📥 Facebook API response body: {}", pagesResponse.getBody());
+
+                if (!pagesResponse.getStatusCode().is2xxSuccessful() || pagesResponse.getBody() == null) {
+                    log.error("❌ Failed to fetch Facebook pages - status: {}", pagesResponse.getStatusCode());
+                    return ResponseEntity.badRequest()
+                            .body(Map.of(
+                                    "success", false,
+                                    "error", "Failed to fetch Facebook pages. Please try reconnecting."
+                            ));
+                }
+
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                com.fasterxml.jackson.databind.JsonNode pagesData = mapper.readTree(pagesResponse.getBody());
+
+                // Check for error in response
+                if (pagesData.has("error")) {
+                    com.fasterxml.jackson.databind.JsonNode error = pagesData.get("error");
+                    String errorMessage = error.has("message") ? error.get("message").asText() : "Unknown error";
+                    log.error("❌ Facebook API error: {}", errorMessage);
+                    return ResponseEntity.badRequest()
+                            .body(Map.of(
+                                    "success", false,
+                                    "error", "Facebook API error: " + errorMessage
+                            ));
+                }
+
+                com.fasterxml.jackson.databind.JsonNode pagesArray = pagesData.get("data");
+
+                if (pagesArray == null) {
+                    log.error("❌ No 'data' field in Facebook response");
+                    log.error("Full response: {}", pagesData.toString());
+                    return ResponseEntity.badRequest()
+                            .body(Map.of(
+                                    "success", false,
+                                    "error", "Invalid response from Facebook. Please try again."
+                            ));
+                }
+
+                if (pagesArray.size() == 0) {
+                    log.warn("⚠️ Facebook returned 0 pages");
+                    log.warn("Full response: {}", pagesData.toString());
+                    return ResponseEntity.badRequest()
+                            .body(Map.of(
+                                    "success", false,
+                                    "error", "No Facebook pages found. Please make sure you're an admin of a Facebook page and granted all permissions during authorization."
+                            ));
+                }
+
+                log.info("✅ Found {} Facebook page(s)", pagesArray.size());
+
+                // Log all pages for debugging
+                for (int i = 0; i < pagesArray.size(); i++) {
+                    com.fasterxml.jackson.databind.JsonNode page = pagesArray.get(i);
+                    log.info("  Page {}: {} (ID: {})",
+                            i + 1,
+                            page.has("name") ? page.get("name").asText() : "Unknown",
+                            page.has("id") ? page.get("id").asText() : "Unknown");
+                }
+
+                // Get first page (in future, you could let user select which page)
+                com.fasterxml.jackson.databind.JsonNode firstPage = pagesArray.get(0);
+
+                if (!firstPage.has("id") || !firstPage.has("name") || !firstPage.has("access_token")) {
+                    log.error("❌ First page missing required fields");
+                    log.error("Page data: {}", firstPage.toString());
+                    return ResponseEntity.badRequest()
+                            .body(Map.of(
+                                    "success", false,
+                                    "error", "Invalid page data from Facebook. Please try again."
+                            ));
+                }
+
+                String pageId = firstPage.get("id").asText();
+                String pageName = firstPage.get("name").asText();
+                String pageAccessToken = firstPage.get("access_token").asText();
+
+                log.info("✅ Selected Facebook page: {} (ID: {})", pageName, pageId);
+
+                // Update credential with tokens AND page info
+                credential.setAccessToken(userAccessToken); // User token (for getting pages)
+                credential.setRefreshToken(null); // Facebook doesn't use refresh tokens
+
+                if (tokenResponse.getExpiresIn() != null) {
+                    credential.setTokenExpiresAt(OffsetDateTime.now(ZoneOffset.UTC)
+                            .plusSeconds(tokenResponse.getExpiresIn()));
+                }
+
+                // Store page-specific data in metadata
+                Map<String, Object> metadata = credential.getMetadata();
+                if (metadata == null) {
+                    metadata = new java.util.HashMap<>();
+                }
+
+                metadata.put("pageId", pageId);
+                metadata.put("pageName", pageName);
+                metadata.put("pageUrl", "https://facebook.com/" + pageId);
+                metadata.put("pageAccessToken", pageAccessToken); // ← Critical for API calls!
+
+                // Serialize metadata to JSON
+                String metadataJson = mapper.writeValueAsString(metadata);
+                credential.setMetadataJson(metadataJson);
+                credential.setMetadata(metadata);
+
+                credential.setStatus(ChannelCredential.CredentialStatus.ACTIVE);
+                credential.setNextSyncScheduled(OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(5));
+
+                credentialRepository.save(credential);
+
+                log.info("✅ Facebook connected successfully for business {}, credential ID: {}, page: {}",
+                        credential.getBusiness().getId(), credential.getId(), pageName);
+
+                return ResponseEntity.ok(Map.of(
+                        "success", true,
+                        "message", "Facebook connected successfully",
+                        "credentialId", credential.getId(),
+                        "pageName", pageName
+                ));
+
+            } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                log.error("❌ JSON parsing error", e);
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Map.of(
+                                "success", false,
+                                "error", "Failed to parse Facebook response: " + e.getMessage()
+                        ));
+            } catch (HttpClientErrorException e) {
+                log.error("❌ Facebook API HTTP error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Map.of(
+                                "success", false,
+                                "error", "Facebook API error: " + e.getMessage()
+                        ));
+            } catch (Exception e) {
+                log.error("❌ Error fetching Facebook page information", e);
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Map.of(
+                                "success", false,
+                                "error", "Failed to get Facebook page information: " + e.getMessage()
+                        ));
+            }
+
+        } catch (PlatformIntegrationException e) {
+            log.error("❌ Facebook OAuth callback error", e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("success", false, "error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("❌ Facebook OAuth callback unexpected error", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "error", "Connection failed: " + e.getMessage()));
+        }
     }
 
     /**
@@ -274,6 +497,80 @@ public class PlatformConnectionController {
             credential.setAccessToken(tokenResponse.getAccessToken());
             credential.setRefreshToken(tokenResponse.getRefreshToken());
 
+            if (platformType == ChannelCredential.PlatformType.GOOGLE_MY_BUSINESS) {
+                try {
+                    log.info("Fetching Google account and location info to cache...");
+
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+                    // Fetch accounts
+                    String accountsUrl = "https://mybusinessaccountmanagement.googleapis.com/v1/accounts";
+                    HttpHeaders headers = new HttpHeaders();
+                    headers.setBearerAuth(tokenResponse.getAccessToken());
+                    HttpEntity<String> entity = new HttpEntity<>(headers);
+
+                    ResponseEntity<String> accountsResponse = restTemplate.exchange(
+                            accountsUrl, HttpMethod.GET, entity, String.class
+                    );
+
+                    com.fasterxml.jackson.databind.JsonNode accountsData = mapper.readTree(accountsResponse.getBody());
+                    com.fasterxml.jackson.databind.JsonNode accounts = accountsData.get("accounts");
+
+                    if (accounts != null && accounts.size() > 0) {
+                        String accountName = accounts.get(0).get("name").asText();
+                        log.info("Found Google account: {}", accountName);
+
+                        // Fetch locations for this account
+                        String locationsUrl = String.format(
+                                "https://mybusinessbusinessinformation.googleapis.com/v1/%s/locations",
+                                accountName
+                        );
+
+                        ResponseEntity<String> locationsResponse = restTemplate.exchange(
+                                locationsUrl, HttpMethod.GET, entity, String.class
+                        );
+
+                        com.fasterxml.jackson.databind.JsonNode locationsData = mapper.readTree(locationsResponse.getBody());
+                        com.fasterxml.jackson.databind.JsonNode locations = locationsData.get("locations");
+
+                        if (locations != null && locations.size() > 0) {
+                            // Get first location
+                            com.fasterxml.jackson.databind.JsonNode firstLocation = locations.get(0);
+                            String locationName = firstLocation.get("name").asText();
+                            String locationTitle = firstLocation.has("title") ? firstLocation.get("title").asText() : "Unknown";
+
+                            log.info("Found location: {} ({})", locationTitle, locationName);
+
+                            // CORRECTED: Get existing metadata and add to it
+                            Map<String, Object> existingMetadata = credential.getMetadata();
+                            if (existingMetadata == null) {
+                                existingMetadata = new HashMap<>();
+                            }
+
+                            // Add Google-specific fields
+                            existingMetadata.put("accountName", accountName);
+                            existingMetadata.put("locationName", locationName);
+                            existingMetadata.put("locationTitle", locationTitle);
+
+                            // CORRECTED: Just call setMetadata (not setMetadataJson)
+                            credential.setMetadata(existingMetadata);
+
+                            log.info("✅ Cached Google account and location - future syncs will avoid rate limits!");
+                        } else {
+                            log.warn("No locations found for Google account");
+                        }
+                    } else {
+                        log.warn("No Google accounts found");
+                    }
+
+                } catch (Exception e) {
+                    // Don't fail OAuth if caching fails - just log warning
+                    log.error("Failed to cache Google account/location info: {}", e.getMessage());
+                    log.warn("Review syncing may encounter rate limits without cached metadata");
+                    // Continue with OAuth success
+                }
+            }
+
             if (tokenResponse.getExpiresIn() != null) {
                 credential.setTokenExpiresAt(OffsetDateTime.now(ZoneOffset.UTC)
                         .plusSeconds(tokenResponse.getExpiresIn()));
@@ -287,10 +584,20 @@ public class PlatformConnectionController {
             log.info("Platform {} connected successfully for business {}, credential ID: {}",
                     platformType, credential.getBusiness().getId(), credential.getId());
 
+            try {
+                log.info("🚀 Triggering immediate review sync for newly connected platform...");
+                reviewSyncService.syncPlatformReviews(credential, credential.getBusiness());
+                log.info("✅ Initial sync completed successfully");
+            } catch (Exception e) {
+                log.error("Initial sync failed (non-fatal): {}", e.getMessage());
+                // Don't fail OAuth if initial sync fails - user can retry later
+            }
+
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "message", platformType.name() + " connected successfully",
-                    "credentialId", credential.getId()
+                    "credentialId", credential.getId(),
+                    "initialSyncTriggered", true // ← Let frontend know sync started
             ));
 
         } catch (PlatformIntegrationException e) {
@@ -547,6 +854,77 @@ public class PlatformConnectionController {
 
         } catch (Exception e) {
             log.error("Error disconnecting platform", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Reorder connected platforms
+     * Updates the display_order for drag-and-drop reordering
+     *
+     * @param businessId Business ID
+     * @param request JSON body with ordered platform IDs
+     * @param authentication Current user
+     * @return Success response
+     */
+    @PutMapping("/business/{businessId}/reorder")
+    public ResponseEntity<?> reorderPlatforms(
+            @PathVariable Long businessId,
+            @RequestBody Map<String, Object> request,
+            Authentication authentication) {
+
+        try {
+            User user = getUserFromAuth(authentication);
+            Business business = businessRepository.findById(businessId)
+                    .orElseThrow(() -> new IllegalArgumentException("Business not found"));
+
+            // Verify ownership
+            if (!business.getOrganization().getId().equals(user.getOrganization().getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Not authorized"));
+            }
+
+            // Get ordered platform IDs from request
+            @SuppressWarnings("unchecked")
+            List<Number> platformIds = (List<Number>) request.get("platformIds");
+
+            if (platformIds == null || platformIds.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Platform IDs are required"));
+            }
+
+            log.info("Reordering platforms for business {}: {}", businessId, platformIds);
+
+            // Update display_order for each platform
+            for (int i = 0; i < platformIds.size(); i++) {
+                Long platformId = platformIds.get(i).longValue();
+                Optional<ChannelCredential> credOpt = credentialRepository.findById(platformId);
+
+                if (credOpt.isPresent()) {
+                    ChannelCredential cred = credOpt.get();
+
+                    // Verify this credential belongs to the business
+                    if (!cred.getBusiness().getId().equals(businessId)) {
+                        log.warn("Platform {} does not belong to business {}", platformId, businessId);
+                        continue;
+                    }
+
+                    cred.setDisplayOrder(i);
+                    credentialRepository.save(cred);
+                    log.debug("Set display order {} for platform {}", i, platformId);
+                }
+            }
+
+            log.info("Successfully reordered {} platforms", platformIds.size());
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Platform order updated"
+            ));
+
+        } catch (Exception e) {
+            log.error("Error reordering platforms", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));
         }

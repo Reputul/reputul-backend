@@ -2,19 +2,17 @@ package com.reputul.backend.controllers;
 
 import com.reputul.backend.auth.JwtUtil;
 import com.reputul.backend.dto.ReviewDto;
-import com.reputul.backend.models.Business;
-import com.reputul.backend.models.EmailTemplate;
-import com.reputul.backend.models.Review;
-import com.reputul.backend.models.User;
-import com.reputul.backend.repositories.BusinessRepository;
-import com.reputul.backend.repositories.EmailTemplateRepository;
-import com.reputul.backend.repositories.ReviewRepository;
-import com.reputul.backend.repositories.UserRepository;
+import com.reputul.backend.integrations.GoogleMyBusinessClient;
+import com.reputul.backend.integrations.PlatformReviewClient;
+import com.reputul.backend.models.*;
+import com.reputul.backend.repositories.*;
 import com.reputul.backend.services.ReputationService;
 import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +21,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/v1/reviews")
@@ -34,6 +33,8 @@ public class ReviewController {
     private final ReputationService reputationService;
     private final UserRepository userRepo;
     private final EmailTemplateRepository emailTemplateRepository;
+    private final ChannelCredentialRepository credentialRepository;
+    private final Map<ChannelCredential.PlatformType, PlatformReviewClient> platformClients;
     private final JwtUtil jwtUtil;
 
     public ReviewController(
@@ -42,6 +43,8 @@ public class ReviewController {
             ReputationService reputationService,
             UserRepository userRepo,
             EmailTemplateRepository emailTemplateRepository,
+            ChannelCredentialRepository credentialRepository,
+            Map<ChannelCredential.PlatformType, PlatformReviewClient> platformClients,
             JwtUtil jwtUtil
     ) {
         this.reviewRepo = reviewRepo;
@@ -49,6 +52,8 @@ public class ReviewController {
         this.reputationService = reputationService;
         this.userRepo = userRepo;
         this.emailTemplateRepository = emailTemplateRepository;
+        this.credentialRepository = credentialRepository;
+        this.platformClients = platformClients;
         this.jwtUtil = jwtUtil;
     }
 
@@ -338,4 +343,104 @@ public class ReviewController {
         emailTemplateRepository.save(newHtmlTemplate);
         log.info("Created new HTML template for user {}", user.getId());
     }
+
+    /**
+     * Reply to a review
+     * Allows business owners to respond to customer reviews
+     *
+     * @param reviewId The review ID to reply to
+     * @param request Request body containing responseText
+     * @param authentication Current user authentication
+     * @return Updated review with response
+     */
+    @PostMapping("/{reviewId}/reply")
+    public ResponseEntity<?> replyToReview(
+            @PathVariable Long reviewId,
+            @RequestBody Map<String, String> request,
+            Authentication authentication) {
+
+        try {
+            User user = getUserFromAuth(authentication);
+            String responseText = request.get("responseText");
+
+            if (responseText == null || responseText.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Response text is required"));
+            }
+
+            // Find the review
+            Review review = reviewRepo.findById(reviewId)
+                    .orElseThrow(() -> new IllegalArgumentException("Review not found"));
+
+            // Verify ownership
+            if (!review.getBusiness().getOrganization().getId().equals(user.getOrganization().getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("error", "Not authorized to reply to this review"));
+            }
+
+            // Save the reply to our database first
+            review.setPlatformResponse(responseText);
+            review.setPlatformResponseAt(OffsetDateTime.now(ZoneOffset.UTC));
+            review = reviewRepo.save(review);
+
+            log.info("User {} replied to review {} (source: {})", user.getEmail(), reviewId, review.getSource());
+
+            // Post to external platform if applicable
+            String source = review.getSource().toLowerCase();
+
+            if (source.equals("google_my_business") || source.equals("google")) {
+                // Post to Google My Business
+                try {
+                    // Find GMB credential for this business
+                    Optional<ChannelCredential> gmbCredential = credentialRepository
+                            .findByBusinessIdAndPlatformType(
+                                    review.getBusiness().getId(),
+                                    ChannelCredential.PlatformType.GOOGLE_MY_BUSINESS
+                            );
+
+                    if (gmbCredential.isPresent()) {
+                        GoogleMyBusinessClient gmbClient = (GoogleMyBusinessClient) platformClients
+                                .get(ChannelCredential.PlatformType.GOOGLE_MY_BUSINESS);
+
+                        if (gmbClient != null && review.getSourceReviewId() != null) {
+                            gmbClient.postReviewReply(
+                                    gmbCredential.get(),
+                                    review.getSourceReviewId(),
+                                    responseText
+                            );
+                            log.info("Successfully posted reply to Google for review {}", reviewId);
+                        }
+                    } else {
+                        log.warn("Google credential not found for business {}", review.getBusiness().getId());
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to post reply to Google, but saved locally", e);
+                    // Continue - we've saved locally even if platform post failed
+                }
+            }
+
+            // Note: Facebook replies would go here if their API supported it
+            // Currently Facebook doesn't allow programmatic replies via API
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Reply posted successfully",
+                    "review", review,
+                    "postedToPlatform", source.contains("google") ? true : false
+            ));
+
+        } catch (Exception e) {
+            log.error("Error replying to review", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to post reply: " + e.getMessage()));
+        }
+    }
+
+    // Helper method (add if not already present)
+    private User getUserFromAuth(Authentication auth) {
+        String email = auth.getName();
+        return userRepo.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+    }
+
 }

@@ -70,4 +70,13 @@ public interface ChannelCredentialRepository extends JpaRepository<ChannelCreden
     List<ChannelCredential> findByStatusAndTokenExpiresAtBefore(
             @Param("status") ChannelCredential.CredentialStatus status,
             @Param("expiryThreshold") OffsetDateTime expiryThreshold);
+
+    /**
+     * Find credentials by status and connection method
+     */
+    List<ChannelCredential> findByStatusAndConnectionMethod(
+            ChannelCredential.CredentialStatus status,
+            String connectionMethod
+    );
+
 }

@@ -309,6 +309,7 @@ public class ReviewSyncService {
                     .platformVerified(dto.getIsPlatformVerified())
                     .platformResponse(dto.getBusinessResponse())
                     .platformResponseAt(dto.getBusinessResponseAt())
+                    .createdAt(dto.getCreatedAt())
                     .syncedAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 

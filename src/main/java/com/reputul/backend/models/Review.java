@@ -76,7 +76,9 @@ public class Review {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        if (createdAt == null) {
+            createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+        }
         if (source == null) {
             source = "manual";
         }
