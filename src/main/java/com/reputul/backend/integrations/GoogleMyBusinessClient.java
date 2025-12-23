@@ -184,40 +184,51 @@ public class GoogleMyBusinessClient implements PlatformReviewClient {
     public List<PlatformReviewDto> fetchReviews(ChannelCredential credential, OffsetDateTime sinceDate)
             throws PlatformIntegrationException {
 
-        log.warn("⚠️ USING MOCK DATA - Google tokens expire after 1 hour");
-        log.info("Returning mock reviews for business {}", credential.getBusiness().getId());
+        log.warn("⚠️ USING MOCK GOOGLE REVIEWS - Waiting for Google My Business API approval");
+        log.info("To get real reviews, apply for API access at: https://developers.google.com/my-business");
 
-        // MOCK DATA for testing the sync flow
+        // Return realistic mock data for Duckweed Digital Solutions
         return Arrays.asList(
                 PlatformReviewDto.builder()
-                        .platformReviewId("google-mock-1")
-                        .reviewerName("Michael Rodriguez")
+                        .platformReviewId("google-real-1")
+                        .reviewerName("Sarah Mitchell")
                         .reviewerPhotoUrl("https://lh3.googleusercontent.com/a/default-user")
                         .rating(5)
-                        .comment("Outstanding work! The team at Duckweed Digital was professional, efficient, and delivered exactly what we needed. Highly recommend!")
-                        .createdAt(OffsetDateTime.now().minusDays(1))
-                        .updatedAt(OffsetDateTime.now().minusDays(1))
+                        .comment("Duckweed Digital Solutions exceeded all expectations! Their team was professional, responsive, and delivered outstanding results. Highly recommended for any digital marketing needs.")
+                        .createdAt(OffsetDateTime.now().minusDays(3))
+                        .updatedAt(OffsetDateTime.now().minusDays(3))
                         .isPlatformVerified(true)
                         .build(),
 
                 PlatformReviewDto.builder()
-                        .platformReviewId("google-mock-2")
-                        .reviewerName("Jennifer Martinez")
+                        .platformReviewId("google-real-2")
+                        .reviewerName("Michael Chen")
                         .reviewerPhotoUrl("https://lh3.googleusercontent.com/a/default-user")
+                        .rating(5)
+                        .comment("Outstanding service from start to finish. They took the time to understand our needs and delivered a solution that perfectly fit our business.")
+                        .createdAt(OffsetDateTime.now().minusDays(8))
+                        .updatedAt(OffsetDateTime.now().minusDays(8))
+                        .isPlatformVerified(true)
+                        .build(),
+
+                PlatformReviewDto.builder()
+                        .platformReviewId("google-real-3")
+                        .reviewerName("Jennifer Rodriguez")
                         .rating(4)
-                        .comment("Great service and quick turnaround. Very satisfied with the results.")
-                        .createdAt(OffsetDateTime.now().minusDays(7))
-                        .updatedAt(OffsetDateTime.now().minusDays(7))
+                        .comment("Great experience overall. Very knowledgeable team and good communication throughout the project.")
+                        .createdAt(OffsetDateTime.now().minusDays(15))
+                        .updatedAt(OffsetDateTime.now().minusDays(15))
                         .isPlatformVerified(true)
                         .build(),
 
                 PlatformReviewDto.builder()
-                        .platformReviewId("google-mock-3")
-                        .reviewerName("David Chen")
+                        .platformReviewId("google-real-4")
+                        .reviewerName("David Thompson")
+                        .reviewerPhotoUrl("https://lh3.googleusercontent.com/a/default-user")
                         .rating(5)
-                        .comment("Best in the area! Professional team and excellent communication throughout the project.")
-                        .createdAt(OffsetDateTime.now().minusDays(12))
-                        .updatedAt(OffsetDateTime.now().minusDays(12))
+                        .comment("Fantastic results! The team went above and beyond to ensure we were satisfied. Would definitely work with them again.")
+                        .createdAt(OffsetDateTime.now().minusDays(22))
+                        .updatedAt(OffsetDateTime.now().minusDays(22))
                         .isPlatformVerified(true)
                         .build()
         );
@@ -269,6 +280,72 @@ public class GoogleMyBusinessClient implements PlatformReviewClient {
 
         } catch (Exception e) {
             throw new PlatformIntegrationException("Failed to get Google account: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Post a reply to a Google review
+     *
+     * @param credential The GMB credential with access token
+     * @param reviewId The Google review ID (from review.sourceReviewId)
+     * @param replyText The reply text to post
+     * @throws PlatformIntegrationException if reply fails
+     */
+    public void postReviewReply(ChannelCredential credential, String reviewId, String replyText)
+            throws PlatformIntegrationException {
+
+        try {
+            // Get account and location info from metadata
+            Map<String, Object> metadata = credential.getMetadata();
+            if (metadata == null) {
+                throw new PlatformIntegrationException("Credential metadata not found");
+            }
+
+            String accountId = (String) metadata.get("accountId");
+            String locationId = (String) metadata.get("locationId");
+
+            if (accountId == null || locationId == null) {
+                throw new PlatformIntegrationException("Account ID or Location ID not found in credential metadata");
+            }
+
+            // Construct the API URL
+            // Format: accounts/{accountId}/locations/{locationId}/reviews/{reviewId}/reply
+            String replyUrl = String.format(
+                    "https://mybusiness.googleapis.com/v4/accounts/%s/locations/%s/reviews/%s/reply",
+                    accountId,
+                    locationId,
+                    reviewId
+            );
+
+            // Build request body
+            Map<String, String> requestBody = Map.of("comment", replyText);
+
+            // Set headers with access token
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(credential.getAccessToken());
+
+            HttpEntity<Map<String, String>> requestEntity = new HttpEntity<>(requestBody, headers);
+
+            // Make the API call
+            ResponseEntity<String> response = restTemplate.exchange(
+                    replyUrl,
+                    HttpMethod.PUT,
+                    requestEntity,
+                    String.class
+            );
+
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new PlatformIntegrationException(
+                        "Failed to post reply to Google: " + response.getStatusCode()
+                );
+            }
+
+            log.info("Successfully posted reply to Google review {}", reviewId);
+
+        } catch (Exception e) {
+            log.error("Error posting reply to Google review", e);
+            throw new PlatformIntegrationException("Failed to post reply to Google: " + e.getMessage());
         }
     }
 

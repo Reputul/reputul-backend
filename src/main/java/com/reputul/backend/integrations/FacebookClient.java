@@ -27,7 +27,7 @@ import java.util.*;
 /**
  * Facebook Page Reviews integration
  *
- * UPDATED: Implements automatic token extension for long-lived tokens
+ * UPDATED: Uses page access token from metadata for API calls
  */
 @Service
 @Slf4j
@@ -133,10 +133,6 @@ public class FacebookClient implements PlatformReviewClient {
         }
     }
 
-    // ========================================
-    // UPDATED: Automatic token extension implementation
-    // ========================================
-
     @Override
     public ChannelCredential refreshToken(ChannelCredential credential)
             throws PlatformIntegrationException {
@@ -203,6 +199,14 @@ public class FacebookClient implements PlatformReviewClient {
             throws PlatformIntegrationException {
 
         try {
+            // CRITICAL FIX: Get page access token from metadata (not user token)
+            String pageAccessToken = getPageAccessTokenFromMetadata(credential);
+            if (pageAccessToken == null) {
+                log.error("No page access token found in metadata for credential {}", credential.getId());
+                throw new PlatformIntegrationException(
+                        "No page access token found. Please reconnect Facebook.");
+            }
+
             // Get page ID from metadata
             String pageId = getPageIdFromCredential(credential);
             if (pageId == null) {
@@ -210,10 +214,10 @@ public class FacebookClient implements PlatformReviewClient {
                 return Collections.emptyList();
             }
 
-            log.info("Fetching Facebook reviews for page: {}", pageId);
+            log.info("Fetching Facebook reviews for page: {} using page access token", pageId);
 
-            // Fetch ratings/reviews from Facebook Graph API
-            List<PlatformReviewDto> apiReviews = fetchReviewsFromGraphAPI(credential.getAccessToken(), pageId);
+            // Fetch ratings/reviews from Facebook Graph API using PAGE token
+            List<PlatformReviewDto> apiReviews = fetchReviewsFromGraphAPI(pageAccessToken, pageId);
 
             // Scrape reviewer names from public page (Graph API doesn't provide names)
             String pageUrl = getPageUrlFromCredential(credential);
@@ -230,17 +234,38 @@ public class FacebookClient implements PlatformReviewClient {
         }
     }
 
-    private List<PlatformReviewDto> fetchReviewsFromGraphAPI(String accessToken, String pageId)
+    /**
+     * CRITICAL: Get page access token from metadata
+     * The page access token is required for accessing page-level resources
+     */
+    private String getPageAccessTokenFromMetadata(ChannelCredential credential) {
+        if (credential.getMetadata() == null) {
+            log.warn("Credential metadata is null");
+            return null;
+        }
+
+        Object token = credential.getMetadata().get("pageAccessToken");
+        if (token == null) {
+            log.warn("No pageAccessToken found in metadata");
+            return null;
+        }
+
+        return token.toString();
+    }
+
+    private List<PlatformReviewDto> fetchReviewsFromGraphAPI(String pageAccessToken, String pageId)
             throws PlatformIntegrationException {
         try {
             String url = String.format("%s/%s/ratings", GRAPH_API_BASE, pageId);
 
             url = UriComponentsBuilder.fromHttpUrl(url)
-                    .queryParam("access_token", accessToken)
-                    .queryParam("fields", "created_time,rating,review_text,reviewer")
+                    .queryParam("access_token", pageAccessToken) // ← Using PAGE token now
+                    .queryParam("fields", "id,created_time,rating,review_text,reviewer")
                     .queryParam("limit", "100")
                     .build()
                     .toUriString();
+
+            log.debug("Fetching Facebook ratings from: {}", url.replace(pageAccessToken, "***"));
 
             ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
 
@@ -252,6 +277,7 @@ public class FacebookClient implements PlatformReviewClient {
             JsonNode data = root.get("data");
 
             if (data == null || !data.isArray()) {
+                log.info("No ratings data returned from Facebook");
                 return Collections.emptyList();
             }
 
@@ -268,25 +294,89 @@ public class FacebookClient implements PlatformReviewClient {
 
             return reviews;
 
+        } catch (HttpClientErrorException e) {
+            log.error("Facebook Graph API error: {} - {}",
+                    e.getStatusCode(), e.getResponseBodyAsString());
+            throw new PlatformIntegrationException(
+                    "Graph API request failed: " + e.getStatusCode() + " - " + e.getResponseBodyAsString(), e);
         } catch (Exception e) {
+            log.error("Unexpected error calling Graph API", e);
             throw new PlatformIntegrationException("Graph API request failed: " + e.getMessage(), e);
         }
     }
 
-    private PlatformReviewDto parseFacebookRating(JsonNode rating) {
-        String reviewId = rating.has("id") ? rating.get("id").asText() : UUID.randomUUID().toString();
-        int ratingValue = rating.has("rating") ? rating.get("rating").asInt() : 0;
-        String reviewText = rating.has("review_text") ? rating.get("review_text").asText() : null;
+    /**
+     * Generate deterministic review ID from content
+     * Uses SHA-256 hash of review_text + created_time
+     * This ensures the same review always gets the same ID
+     */
+    private String generateDeterministicId(String reviewText, String createdTime) {
+        try {
+            String input = (reviewText + "|" + createdTime).trim();
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
-        // Parse created_time
+            // Convert to hex string (first 16 characters for brevity)
+            StringBuilder hexString = new StringBuilder();
+            for (int i = 0; i < Math.min(hash.length, 8); i++) {
+                String hex = Integer.toHexString(0xff & hash[i]);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return "fb_" + hexString.toString();
+        } catch (Exception e) {
+            log.error("Failed to generate deterministic ID", e);
+            return "fb_" + UUID.randomUUID().toString();
+        }
+    }
+
+    private PlatformReviewDto parseFacebookRating(JsonNode rating) {
+        // Facebook's /ratings endpoint doesn't return an 'id' field
+        // Generate deterministic ID from review text + created_time to prevent duplicates
+        String reviewText = rating.has("review_text") ? rating.get("review_text").asText() : "";
+        String createdTime = rating.has("created_time") ? rating.get("created_time").asText() : "";
+        String reviewId = generateDeterministicId(reviewText, createdTime);
+
+        log.info("Facebook review ID (generated): {}", reviewId);
+
+        // Facebook uses recommendations (positive/negative), not star ratings
+        // Map to 5-star system: positive=5, negative=1 (like NiceJob does)
+        int ratingValue = 5; // Default to positive
+        if (rating.has("recommendation_type")) {
+            String recommendationType = rating.get("recommendation_type").asText();
+            ratingValue = "positive".equalsIgnoreCase(recommendationType) ? 5 : 1;
+        } else if (rating.has("has_recommendation")) {
+            boolean hasRecommendation = rating.get("has_recommendation").asBoolean();
+            ratingValue = hasRecommendation ? 5 : 1;
+        }
+
+        // Use empty string as null for consistency (already extracted above)
+        if (reviewText.isEmpty()) {
+            reviewText = null;
+        }
+
+        // Parse created_time (Facebook returns ISO 8601 format: "2024-11-01T18:59:26+0000")
         OffsetDateTime createdAt = OffsetDateTime.now();
         if (rating.has("created_time")) {
             try {
-                long timestamp = rating.get("created_time").asLong();
-                createdAt = OffsetDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneOffset.UTC);
+                String createdTimeStr = rating.get("created_time").asText();
+
+                // Facebook uses format: "2024-11-01T18:59:26+0000"
+                // Replace +0000 with Z for standard ISO parsing
+                if (createdTimeStr.endsWith("+0000")) {
+                    createdTimeStr = createdTimeStr.replace("+0000", "Z");
+                }
+
+                createdAt = OffsetDateTime.parse(createdTimeStr);
+                log.info("Parsed Facebook review date: {}", createdAt);
             } catch (Exception e) {
-                log.warn("Failed to parse Facebook timestamp");
+                log.error("Failed to parse Facebook timestamp '{}': {}",
+                        rating.has("created_time") ? rating.get("created_time").asText() : "null",
+                        e.getMessage());
+                // Keep default to now() as fallback
             }
+        } else {
+            log.warn("Facebook rating {} missing created_time field", rating.has("id") ? rating.get("id").asText() : "unknown");
         }
 
         // Reviewer info (limited from Graph API)
@@ -361,9 +451,13 @@ public class FacebookClient implements PlatformReviewClient {
             String pageId = getPageIdFromCredential(credential);
             if (pageId == null) return false;
 
+            // Use page access token for validation
+            String pageAccessToken = getPageAccessTokenFromMetadata(credential);
+            if (pageAccessToken == null) return false;
+
             String url = String.format("%s/%s", GRAPH_API_BASE, pageId);
             url = UriComponentsBuilder.fromHttpUrl(url)
-                    .queryParam("access_token", credential.getAccessToken())
+                    .queryParam("access_token", pageAccessToken)
                     .queryParam("fields", "id,name")
                     .build()
                     .toUriString();
@@ -372,6 +466,7 @@ public class FacebookClient implements PlatformReviewClient {
             return response.getStatusCode().is2xxSuccessful();
 
         } catch (Exception e) {
+            log.warn("Facebook credential validation failed: {}", e.getMessage());
             return false;
         }
     }
