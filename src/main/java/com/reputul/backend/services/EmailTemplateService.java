@@ -304,79 +304,78 @@ public class EmailTemplateService {
         }
     }
 
-    // GOOGLE COMPLIANT: Create modern, Google-compliant templates
+    // Create clean, simple default templates
     @Transactional
     public void createGoogleCompliantTemplates(User user) {
         List<EmailTemplate> templates = Arrays.asList(
-                // 1. Google Compliant Initial Request Template
+                // 1. Initial Review Request
                 EmailTemplate.builder()
-                        .name("Google Compliant Review Request")
-                        .subject("We'd love your honest feedback, {{customerName}}!")
-                        .body(createGoogleCompliantInitialRequestTemplate())
+                        .name("Initial Review Request")
+                        .subject("We'd love your feedback, {{customerName}}!")
+                        .body(createSimpleInitialRequestTemplate())
                         .type(EmailTemplate.TemplateType.INITIAL_REQUEST)
                         .isActive(true)
                         .isDefault(true)
+                        .simplifiedMode(true)
+                        .buttonUrlType(EmailTemplate.ButtonUrlType.FEEDBACK_GATE)
                         .user(user)
                         .build(),
 
-                // 2. Google Compliant Multi-Platform Request Template
+                // 2. 3-Day Follow-up
                 EmailTemplate.builder()
-                        .name("Google Compliant Multi-Platform Request")
-                        .subject("Share your experience - {{businessName}}")
-                        .body(createGoogleCompliantInitialRequestTemplate())
-                        .type(EmailTemplate.TemplateType.INITIAL_REQUEST)
-                        .isActive(true)
-                        .isDefault(false)
-                        .user(user)
-                        .build(),
-
-                // 3. Google Compliant 3-Day Follow-up
-                EmailTemplate.builder()
-                        .name("Google Compliant 3-Day Follow-up")
+                        .name("3-Day Follow-up")
                         .subject("Quick check-in: How was your {{serviceType}} experience?")
-                        .body(createGoogleCompliant3DayFollowUpTemplate())
+                        .body(createSimple3DayFollowUpTemplate())
                         .type(EmailTemplate.TemplateType.FOLLOW_UP_3_DAY)
                         .isActive(true)
                         .isDefault(true)
+                        .simplifiedMode(true)
+                        .buttonUrlType(EmailTemplate.ButtonUrlType.FEEDBACK_GATE)
                         .user(user)
                         .build(),
 
-                // 4. Google Compliant 7-Day Follow-up
+                // 3. 7-Day Follow-up
                 EmailTemplate.builder()
-                        .name("Google Compliant 7-Day Follow-up")
+                        .name("7-Day Follow-up")
                         .subject("Your opinion matters - {{businessName}}")
-                        .body(createGoogleCompliant7DayFollowUpTemplate())
+                        .body(createSimple7DayFollowUpTemplate())
                         .type(EmailTemplate.TemplateType.FOLLOW_UP_7_DAY)
                         .isActive(true)
                         .isDefault(true)
+                        .simplifiedMode(true)
+                        .buttonUrlType(EmailTemplate.ButtonUrlType.FEEDBACK_GATE)
                         .user(user)
                         .build(),
 
-                // 5. Google Compliant 14-Day Follow-up
+                // 4. 14-Day Final Follow-up
                 EmailTemplate.builder()
-                        .name("Google Compliant 14-Day Follow-up")
+                        .name("14-Day Final Follow-up")
                         .subject("Final request: Share your {{businessName}} experience")
-                        .body(createGoogleCompliant14DayFollowUpTemplate())
+                        .body(createSimple14DayFollowUpTemplate())
                         .type(EmailTemplate.TemplateType.FOLLOW_UP_14_DAY)
                         .isActive(true)
                         .isDefault(true)
+                        .simplifiedMode(true)
+                        .buttonUrlType(EmailTemplate.ButtonUrlType.FEEDBACK_GATE)
                         .user(user)
                         .build(),
 
-                // 6. Google Compliant Thank You Template
+                // 5. Thank You Template
                 EmailTemplate.builder()
-                        .name("Google Compliant Thank You")
+                        .name("Thank You for Your Review")
                         .subject("Thank you so much, {{customerName}}!")
-                        .body(createGoogleCompliantThankYouTemplate())
+                        .body(createSimpleThankYouTemplate())
                         .type(EmailTemplate.TemplateType.THANK_YOU)
                         .isActive(true)
                         .isDefault(true)
+                        .simplifiedMode(true)
+                        .buttonUrlType(EmailTemplate.ButtonUrlType.FEEDBACK_GATE)
                         .user(user)
                         .build()
         );
 
         emailTemplateRepository.saveAll(templates);
-        log.info("✅ Created {} Google-compliant templates for user {}", templates.size(), user.getId());
+        log.info("✅ Created {} clean templates for user {}", templates.size(), user.getId());
     }
 
     // Get user template statistics
@@ -395,449 +394,81 @@ public class EmailTemplateService {
         return stats;
     }
 
-    // GOOGLE COMPLIANT TEMPLATE CREATION METHODS
+    // Plain text that renderer will convert to HTML
 
     /**
-     * GOOGLE COMPLIANT: Initial request template - Always shows ALL platforms to ALL customers
+     * Initial Review Request - Simple and friendly
      */
-    private String createGoogleCompliantInitialRequestTemplate() {
+    private String createSimpleInitialRequestTemplate() {
         return """
-        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-        <html xmlns="http://www.w3.org/1999/xhtml">
-        <head>
-            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>Share Your Experience</title>
-        </head>
-        <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; line-height: 1.4; color: #333333; background-color: #f0f0f0;">
-            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f0f0f0; min-height: 100%;">
-                <tr>
-                    <td align="center" style="padding: 20px;">
-                        <table cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                            
-                            <!-- Header -->
-                            <tr>
-                                <td style="background-color: #4a90e2; color: #ffffff; padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
-                                    <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #ffffff;">{{businessName}}</h1>
-                                    <p style="margin: 10px 0 0 0; font-size: 16px; color: #ffffff;">We value your honest feedback</p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Main Content -->
-                            <tr>
-                                <td style="padding: 40px 30px;">
-                                    <table cellpadding="0" cellspacing="0" border="0" width="100%">
-                                        <tr>
-                                            <td style="text-align: center; padding-bottom: 20px;">
-                                                <span style="font-size: 40px;">⭐</span>
-                                            </td>
-                                        </tr>
-                                        <tr>
-                                            <td>
-                                                <p style="margin: 0 0 15px 0; font-size: 16px; color: #333333;">Hi {{customerName}},</p>
-                                                <p style="margin: 0 0 15px 0; font-size: 14px; color: #666666;">Thank you for choosing {{businessName}} for your {{serviceType}} on {{serviceDate}}.</p>
-                                                <p style="margin: 0 0 30px 0; font-size: 14px; color: #666666;">We hope you were satisfied with our service. Your honest feedback - whether positive or negative - helps us improve and assists other customers in making informed decisions.</p>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                    
-                                    <!-- GOOGLE COMPLIANT: All Review Options Always Available -->
-                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
-                                        <tr>
-                                            <td style="padding: 30px 20px; text-align: center;">
-                                                <h2 style="margin: 0 0 10px 0; color: #333333; font-size: 20px; font-weight: bold;">Share Your Honest Experience</h2>
-                                                <p style="margin: 0 0 25px 0; color: #666666; font-size: 14px;">Choose whichever platform you prefer - all options are always available:</p>
-                                                
-                                                <!-- Google Review Button -->
-                                                <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto 15px auto;">
-                                                    <tr>
-                                                        <td>
-                                                            <a href="{{googleReviewUrl}}" style="text-decoration: none;">
-                                                                <table cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border: 2px solid #4285f4; border-radius: 6px;">
-                                                                    <tr>
-                                                                        <td style="padding: 12px 30px; text-align: center;">
-                                                                            <span style="color: #4285f4; font-weight: bold; font-size: 16px;">⭐ Google Review</span>
-                                                                        </td>
-                                                                    </tr>
-                                                                </table>
-                                                            </a>
-                                                        </td>
-                                                    </tr>
-                                                </table>
-                                                
-                                                <!-- Facebook Review Button -->
-                                                <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto 15px auto;">
-                                                    <tr>
-                                                        <td>
-                                                            <a href="{{facebookReviewUrl}}" style="text-decoration: none;">
-                                                                <table cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border: 2px solid #1877f2; border-radius: 6px;">
-                                                                    <tr>
-                                                                        <td style="padding: 12px 30px; text-align: center;">
-                                                                            <span style="color: #1877f2; font-weight: bold; font-size: 16px;">👍 Facebook Review</span>
-                                                                        </td>
-                                                                    </tr>
-                                                                </table>
-                                                            </a>
-                                                        </td>
-                                                    </tr>
-                                                </table>
-                                                
-                                                <!-- Yelp Review Button -->
-                                                <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto 15px auto;">
-                                                    <tr>
-                                                        <td>
-                                                            <a href="{{yelpReviewUrl}}" style="text-decoration: none;">
-                                                                <table cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border: 2px solid #d32323; border-radius: 6px;">
-                                                                    <tr>
-                                                                        <td style="padding: 12px 30px; text-align: center;">
-                                                                            <span style="color: #d32323; font-weight: bold; font-size: 16px;">⭐ Yelp Review</span>
-                                                                        </td>
-                                                                    </tr>
-                                                                </table>
-                                                            </a>
-                                                        </td>
-                                                    </tr>
-                                                </table>
-                                                
-                                                <!-- Private Feedback Button -->
-                                                <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
-                                                    <tr>
-                                                        <td>
-                                                            <a href="{{privateFeedbackUrl}}" style="text-decoration: none;">
-                                                                <table cellpadding="0" cellspacing="0" border="0" style="background-color: #4a90e2; border-radius: 6px;">
-                                                                    <tr>
-                                                                        <td style="padding: 12px 30px; text-align: center;">
-                                                                            <span style="color: #ffffff; font-weight: bold; font-size: 16px;">💬 Private Feedback</span>
-                                                                        </td>
-                                                                    </tr>
-                                                                </table>
-                                                            </a>
-                                                        </td>
-                                                    </tr>
-                                                </table>
+Hi {{customerName}}!
 
-                                                <p style="margin: 20px 0 0 0; color: #666666; font-size: 12px;">
-                                                    ✅ All feedback options are always available. We appreciate your honest review.
-                                                </p>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                    
-                                    <p style="margin: 25px 0 0 0; color: #666666; font-size: 13px; text-align: center;">
-                                        Your honest feedback helps us improve and helps other customers make informed decisions.
-                                    </p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Footer -->
-                            <tr>
-                                <td style="background-color: #f8f9fa; padding: 25px 30px; border-top: 1px solid #dee2e6; text-align: center; border-radius: 0 0 8px 8px;">
-                                    <p style="margin: 0 0 5px 0; font-weight: bold; color: #333333; font-size: 16px;">{{businessName}}</p>
-                                    <p style="margin: 0 0 5px 0; font-size: 14px; color: #666666;">{{businessPhone}}</p>
-                                    <p style="margin: 0 0 15px 0; font-size: 14px; color: #666666;">{{businessWebsite}}</p>
-                                    <p style="margin: 0; font-size: 12px; color: #999999;">
-                                        <a href="{{unsubscribeUrl}}" style="color: #666666; text-decoration: none;">Unsubscribe</a>
-                                    </p>
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """;
+Thank you for choosing {{businessName}} for your {{serviceType}}.
+
+We hope you were satisfied with our service. We'd love to hear your honest feedback - it helps us improve and helps other customers make informed decisions.
+
+Thanks!
+    """.trim();
     }
 
-    private String createGoogleCompliant3DayFollowUpTemplate() {
+    /**
+     * 3-Day Follow-up - Gentle reminder
+     */
+    private String createSimple3DayFollowUpTemplate() {
         return """
-        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-        <html xmlns="http://www.w3.org/1999/xhtml">
-        <head>
-            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>Quick Follow-up</title>
-        </head>
-        <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; line-height: 1.4; color: #333333; background-color: #fff8e1;">
-            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #fff8e1; min-height: 100%;">
-                <tr>
-                    <td align="center" style="padding: 20px;">
-                        <table cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 8px;">
-                            
-                            <!-- Header -->
-                            <tr>
-                                <td style="background-color: #ff9800; color: #ffffff; padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
-                                    <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #ffffff;">{{businessName}}</h1>
-                                    <p style="margin: 10px 0 0 0; font-size: 16px; color: #ffffff;">Quick check-in</p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Main Content -->
-                            <tr>
-                                <td style="padding: 40px 30px;">
-                                    <p style="margin: 0 0 15px 0; font-size: 16px; color: #333333;">Hi {{customerName}},</p>
-                                    <p style="margin: 0 0 15px 0; font-size: 14px; color: #666666;">It's been a few days since we completed your {{serviceType}} service. We hope everything is going well!</p>
-                                    <p style="margin: 0 0 30px 0; font-size: 14px; color: #666666;">If you have a moment, we'd really appreciate your honest feedback about your experience with us.</p>
-                                    
-                                    <!-- COMPLIANT: All Review Options -->
-                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #fff3c4; border-radius: 8px; padding: 25px; text-align: center;">
-                                        <tr>
-                                            <td>
-                                                <h3 style="margin: 0 0 15px 0; color: #e65100;">Share Your Experience</h3>
-                                                <p style="margin: 0 0 20px 0; color: #f57f17; font-size: 14px;">All platforms are always available:</p>
-                                                
-                                                <!-- All platform buttons with equal treatment -->
-                                                <div style="margin-bottom: 10px;">
-                                                    <a href="{{googleReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #333; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px; border: 2px solid #ffcc02;">⭐ Google</a>
-                                                    <a href="{{facebookReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #333; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px; border: 2px solid #ffcc02;">👍 Facebook</a>
-                                                </div>
-                                                <div>
-                                                    <a href="{{yelpReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #333; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px; border: 2px solid #ffcc02;">⭐ Yelp</a>
-                                                    <a href="{{privateFeedbackUrl}}" style="display: inline-block; background-color: #ff9800; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">💬 Private</a>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                </td>
-                            </tr>
-                            
-                            <!-- Footer -->
-                            <tr>
-                                <td style="background-color: #fffbf0; padding: 25px 30px; text-align: center; border-radius: 0 0 8px 8px;">
-                                    <p style="margin: 0; font-size: 14px; color: #666666;">{{businessName}} • {{businessPhone}} • {{businessWebsite}}</p>
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """;
+Hi {{customerName}},
+
+We wanted to follow up on the {{serviceType}} service we provided a few days ago.
+
+We'd really appreciate it if you could take a moment to share your experience. Your feedback - whether positive or constructive - is valuable to us.
+
+Thank you!
+    """.trim();
     }
 
-    private String createGoogleCompliant7DayFollowUpTemplate() {
+    /**
+     * 7-Day Follow-up - Polite persistence
+     */
+    private String createSimple7DayFollowUpTemplate() {
         return """
-        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-        <html xmlns="http://www.w3.org/1999/xhtml">
-        <head>
-            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>One Week Follow-up</title>
-        </head>
-        <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; line-height: 1.4; color: #333333; background-color: #ffebee;">
-            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffebee; min-height: 100%;">
-                <tr>
-                    <td align="center" style="padding: 20px;">
-                        <table cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 8px;">
-                            
-                            <!-- Header -->
-                            <tr>
-                                <td style="background-color: #d32f2f; color: #ffffff; padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
-                                    <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #ffffff;">{{businessName}}</h1>
-                                    <p style="margin: 10px 0 0 0; font-size: 16px; color: #ffffff;">We'd love your feedback</p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Main Content -->
-                            <tr>
-                                <td style="padding: 40px 30px; text-align: center;">
-                                    <p style="margin: 0 0 15px 0; font-size: 16px; color: #333333;">Hi {{customerName}},</p>
-                                    <p style="margin: 0 0 15px 0; font-size: 14px; color: #666666;">It's been a week since your {{serviceType}} service. We hope everything is still working perfectly!</p>
-                                    <p style="margin: 0 0 30px 0; font-size: 14px; color: #666666;">We'd be incredibly grateful for your honest feedback about your experience with us.</p>
-                                    
-                                    <!-- COMPLIANT: Equal treatment for all platforms -->
-                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #ffebee; border-radius: 8px; padding: 20px;">
-                                        <tr>
-                                            <td style="text-align: center;">
-                                                <h3 style="margin: 0 0 15px 0; color: #c62828;">Your Opinion Matters! 💭</h3>
-                                                <p style="margin: 0 0 15px 0; color: #d32f2f; font-size: 14px;">All review options are equally available:</p>
-                                                
-                                                <a href="{{googleReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #333; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 8px; border: 2px solid #d32f2f; font-weight: bold;">⭐ Google Review</a>
-                                                <a href="{{facebookReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #333; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 8px; border: 2px solid #d32f2f; font-weight: bold;">👍 Facebook Review</a>
-                                                <br>
-                                                <a href="{{yelpReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #333; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 8px; border: 2px solid #d32f2f; font-weight: bold;">⭐ Yelp Review</a>
-                                                <a href="{{privateFeedbackUrl}}" style="display: inline-block; background-color: #d32f2f; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 8px; font-weight: bold;">💬 Private Feedback</a>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                    
-                                    <p style="margin: 25px 0 0 0; color: #d32f2f; font-size: 13px;">
-                                        Your honest feedback helps us improve and helps other customers make informed decisions.
-                                    </p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Footer -->
-                            <tr>
-                                <td style="background-color: #ffebee; padding: 25px 30px; text-align: center; border-radius: 0 0 8px 8px;">
-                                    <p style="margin: 0; font-size: 14px; color: #666666;">{{businessName}} • {{businessPhone}} • {{businessWebsite}}</p>
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """;
+Hi {{customerName}},
+
+We hope you're still enjoying the results of your {{serviceType}} service!
+
+We'd love to hear your thoughts about your experience with {{businessName}}. Your honest feedback helps us serve you and others better.
+
+We appreciate your time!
+    """.trim();
     }
 
-    private String createGoogleCompliant14DayFollowUpTemplate() {
+    /**
+     * 14-Day Final Follow-up - Last gentle request
+     */
+    private String createSimple14DayFollowUpTemplate() {
         return """
-        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-        <html xmlns="http://www.w3.org/1999/xhtml">
-        <head>
-            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>Final Follow-up</title>
-        </head>
-        <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; line-height: 1.4; color: #333333; background-color: #f3e5f5;">
-            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f3e5f5; min-height: 100%;">
-                <tr>
-                    <td align="center" style="padding: 20px;">
-                        <table cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 8px;">
-                            
-                            <!-- Header -->
-                            <tr>
-                                <td style="background-color: #7b1fa2; color: #ffffff; padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
-                                    <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #ffffff;">{{businessName}}</h1>
-                                    <p style="margin: 10px 0 0 0; font-size: 16px; color: #ffffff;">Final follow-up</p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Main Content -->
-                            <tr>
-                                <td style="padding: 40px 30px; text-align: center;">
-                                    <span style="font-size: 40px; display: block; margin-bottom: 20px;">🙏</span>
-                                    <p style="margin: 0 0 15px 0; font-size: 16px; color: #333333;">Hi {{customerName}},</p>
-                                    <p style="margin: 0 0 15px 0; font-size: 14px; color: #666666;">It's been two weeks since your {{serviceType}} service.</p>
-                                    <p style="margin: 0 0 30px 0; font-size: 14px; color: #666666;">This will be our final follow-up. If you have a spare minute, we'd be tremendously grateful for your honest review. It really helps our small business!</p>
-                                    
-                                    <!-- COMPLIANT: Final request shows all options -->
-                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f3e5f5; border-radius: 8px; padding: 25px;">
-                                        <tr>
-                                            <td style="text-align: center;">
-                                                <h3 style="margin: 0 0 10px 0; color: #4a148c;">Share Your Experience 🙏</h3>
-                                                <p style="margin: 0 0 20px 0; color: #7b1fa2; font-size: 14px;">All platforms are available - choose what works for you:</p>
-                                                
-                                                <div style="margin-bottom: 15px;">
-                                                    <a href="{{googleReviewUrl}}" style="display: inline-block; background-color: #7b1fa2; color: white; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin: 5px; font-weight: bold; font-size: 16px;">⭐ Google Review</a>
-                                                </div>
-                                                <div style="margin-bottom: 15px;">
-                                                    <a href="{{facebookReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #7b1fa2; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin: 5px; border: 2px solid #7b1fa2; font-weight: bold; font-size: 16px;">👍 Facebook Review</a>
-                                                </div>
-                                                <div style="margin-bottom: 15px;">
-                                                    <a href="{{yelpReviewUrl}}" style="display: inline-block; background-color: #ffffff; color: #7b1fa2; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin: 5px; border: 2px solid #7b1fa2; font-weight: bold; font-size: 16px;">⭐ Yelp Review</a>
-                                                </div>
-                                                <div>
-                                                    <a href="{{privateFeedbackUrl}}" style="display: inline-block; background-color: #ffffff; color: #7b1fa2; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin: 5px; border: 2px solid #7b1fa2; font-weight: bold; font-size: 16px;">💬 Private Feedback</a>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                    
-                                    <p style="margin: 25px 0 0 0; color: #7b1fa2; font-size: 13px;">
-                                        Thank you for being a valued customer. We hope to serve you again!
-                                    </p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Footer -->
-                            <tr>
-                                <td style="background-color: #f8f9fa; padding: 25px 30px; text-align: center; border-radius: 0 0 8px 8px;">
-                                    <p style="margin: 0; font-size: 14px; color: #666666;">{{businessName}} • {{businessPhone}} • {{businessWebsite}}</p>
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """;
+Hi {{customerName}},
+
+This is our final request for feedback about the {{serviceType}} service we provided.
+
+If you have a moment, we'd really value your honest review. Whether your experience was great or there's room for improvement, your feedback matters to us.
+
+Thank you for considering!
+    """.trim();
     }
 
-    private String createGoogleCompliantThankYouTemplate() {
+    /**
+     * Thank You - Gratitude for review
+     */
+    private String createSimpleThankYouTemplate() {
         return """
-        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-        <html xmlns="http://www.w3.org/1999/xhtml">
-        <head>
-            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>Thank You!</title>
-        </head>
-        <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; line-height: 1.4; color: #333333; background-color: #e8f5e8;">
-            <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #e8f5e8; min-height: 100%;">
-                <tr>
-                    <td align="center" style="padding: 20px;">
-                        <table cellpadding="0" cellspacing="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 8px;">
-                            
-                            <!-- Header -->
-                            <tr>
-                                <td style="background-color: #2e7d32; color: #ffffff; padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
-                                    <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #ffffff;">{{businessName}}</h1>
-                                    <p style="margin: 10px 0 0 0; font-size: 16px; color: #ffffff;">Thank you so much!</p>
-                                </td>
-                            </tr>
-                            
-                            <!-- Main Content -->
-                            <tr>
-                                <td style="padding: 40px 30px; text-align: center;">
-                                    <span style="font-size: 60px; display: block; margin-bottom: 30px;">🎉</span>
-                                    
-                                    <h2 style="margin: 0 0 20px 0; font-size: 28px; color: #1b5e20; font-weight: bold;">Thank You, {{customerName}}!</h2>
-                                    
-                                    <p style="margin: 0 0 15px 0; font-size: 18px; color: #333333;">We received your review and we're absolutely thrilled!</p>
-                                    <p style="margin: 0 0 30px 0; font-size: 14px; color: #666666;">Your honest feedback about our {{serviceType}} service means the world to us and helps other customers make informed decisions.</p>
-                                    
-                                    <!-- Why Reviews Matter Section -->
-                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #e8f5e8; border-radius: 8px; padding: 25px;">
-                                        <tr>
-                                            <td style="text-align: center;">
-                                                <h3 style="margin: 0 0 20px 0; color: #2e7d32; font-size: 18px; font-weight: bold;">Why Your Review Matters</h3>
-                                                <table cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
-                                                    <tr><td style="padding: 5px 0; color: #1b5e20; font-size: 14px;"><span style="color: #2e7d32; font-weight: bold; margin-right: 10px;">✓</span>Helps other customers find us</td></tr>
-                                                    <tr><td style="padding: 5px 0; color: #1b5e20; font-size: 14px;"><span style="color: #2e7d32; font-weight: bold; margin-right: 10px;">✓</span>Supports our small business</td></tr>
-                                                    <tr><td style="padding: 5px 0; color: #1b5e20; font-size: 14px;"><span style="color: #2e7d32; font-weight: bold; margin-right: 10px;">✓</span>Motivates our entire team</td></tr>
-                                                    <tr><td style="padding: 5px 0; color: #1b5e20; font-size: 14px;"><span style="color: #2e7d32; font-weight: bold; margin-right: 10px;">✓</span>Helps us improve our service</td></tr>
-                                                </table>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                    
-                                    <p style="margin: 30px 0 20px 0; color: #2e7d32; font-size: 16px; font-weight: bold;">
-                                        We appreciate you taking the time to share your honest experience!
-                                    </p>
-                                    
-                                    <!-- Future Service Section -->
-                                    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color: #f8f9fa; border-radius: 8px; padding: 20px;">
-                                        <tr>
-                                            <td style="text-align: center;">
-                                                <h3 style="margin: 0 0 10px 0; color: #333333; font-size: 18px; font-weight: bold;">Need Future Service?</h3>
-                                                <p style="margin: 0 0 15px 0; color: #666666; font-size: 14px;">We're always here to help when you need us again.</p>
-                                                <p style="margin: 0 0 5px 0; font-weight: bold; color: #333333; font-size: 16px;">{{businessPhone}}</p>
-                                                <p style="margin: 0; font-size: 14px; color: #666666;">{{businessWebsite}}</p>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                </td>
-                            </tr>
-                            
-                            <!-- Footer -->
-                            <tr>
-                                <td style="background-color: #2e7d32; color: #ffffff; padding: 25px 30px; text-align: center; border-radius: 0 0 8px 8px;">
-                                    <p style="margin: 0 0 5px 0; font-size: 18px; font-weight: bold; color: #ffffff;">{{businessName}} Team</p>
-                                    <p style="margin: 0; font-size: 14px; color: #ffffff;">Committed to excellence in every service</p>
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """;
+Thank you so much, {{customerName}}!
+
+We received your review and we're truly grateful. Your honest feedback means the world to us and helps other customers make informed decisions.
+
+We appreciate you taking the time to share your experience with {{businessName}}.
+
+Thanks again!
+    """.trim();
     }
 
     // Helper methods for preview and rendering
@@ -856,7 +487,7 @@ public class EmailTemplateService {
                 .build();
     }
 
-    // GOOGLE COMPLIANT: Create sample variables with all platform URLs
+    // Create sample variables with all platform URLs
     private Map<String, String> createCompliantSampleVariables() {
         Map<String, String> variables = new HashMap<>();
         variables.put("customerName", "John Smith");
@@ -866,7 +497,7 @@ public class EmailTemplateService {
         variables.put("businessPhone", "(555) 123-4567");
         variables.put("businessWebsite", "www.abchomeservices.com");
 
-        // ✅ GOOGLE COMPLIANT: All platform URLs always available
+        // All platform URLs always available
         variables.put("googleReviewUrl", "https://search.google.com/local/writereview?placeid=sample_place_id");
         variables.put("facebookReviewUrl", "https://facebook.com/abchomeservices/reviews");
         variables.put("yelpReviewUrl", "https://yelp.com/biz/abc-home-services");

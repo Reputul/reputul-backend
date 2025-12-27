@@ -20,5 +20,7 @@ public class UpdateEmailTemplateRequest {
     private Boolean isActive;
     private Boolean isDefault;
     private List<String> availableVariables;
+    private Boolean simplifiedMode;
+    private EmailTemplate.ButtonUrlType buttonUrlType;
+    private Boolean showMultiplePlatforms;
 }
-// This class is used to update an existing email template with new values.

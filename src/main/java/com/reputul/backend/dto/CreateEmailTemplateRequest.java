@@ -20,4 +20,7 @@ public class CreateEmailTemplateRequest {
     private Boolean isActive = true;
     private Boolean isDefault = false;
     private List<String> availableVariables;
+    private Boolean simplifiedMode;
+    private EmailTemplate.ButtonUrlType buttonUrlType;
+    private Boolean showMultiplePlatforms;
 }

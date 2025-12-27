@@ -22,13 +22,16 @@ public class EmailTemplateDto {
     private String typeDisplayName;
     private Boolean isActive;
     private Boolean isDefault;
-    private Boolean isSystemTemplate; // NEW: Indicates if this is a system template vs user-created
-    private Boolean isHtml; // NEW: Indicates if template contains HTML
+    private Boolean isSystemTemplate; // Indicates if this is a system template vs user-created
+    private Boolean isHtml; //Indicates if template contains HTML
     private List<String> availableVariables;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
-
-    // Additional metadata for UI
+    private Boolean simplifiedMode;
+    private EmailTemplate.ButtonUrlType buttonUrlType;
+    private Boolean showMultiplePlatforms;
+    private Long styleId;
+    private EmailTemplateStyleDto style;
     private Integer templateCount; // For summary views
     private String description; // For template descriptions
 }
