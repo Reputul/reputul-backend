@@ -25,4 +25,5 @@ public class CreateStepRequest {
 
     @NotBlank(message = "Body template is required")
     private String bodyTemplate;
+    private String emailTemplateType;
 }

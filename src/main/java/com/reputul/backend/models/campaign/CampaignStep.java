@@ -42,8 +42,12 @@ public class CampaignStep {
     private String subjectTemplate;
 
     @NotBlank
-    @Column(name = "body_template", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "body_template", columnDefinition = "TEXT")
     private String bodyTemplate;
+
+    // NEW: Optional reference to EmailTemplate (for EMAIL message types)
+    @Column(name = "email_template_id")
+    private Long emailTemplateId;
 
     @Column(name = "is_active")
     private Boolean isActive = true;
@@ -127,6 +131,14 @@ public class CampaignStep {
         this.isActive = isActive;
     }
 
+    public Long getEmailTemplateId() {
+        return emailTemplateId;
+    }
+
+    public void setEmailTemplateId(Long emailTemplateId) {
+        this.emailTemplateId = emailTemplateId;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -138,6 +150,14 @@ public class CampaignStep {
     // Helper methods
     public boolean requiresSubject() {
         return messageType != null && messageType.isEmail();
+    }
+
+    public boolean usesEmailTemplate() {
+        return messageType != null && messageType.isEmail() && emailTemplateId != null;
+    }
+
+    public boolean usesFallbackBody() {
+        return !usesEmailTemplate() && bodyTemplate != null;
     }
 
     public String getDelayDescription() {

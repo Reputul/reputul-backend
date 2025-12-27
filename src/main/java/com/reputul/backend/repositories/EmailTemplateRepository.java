@@ -49,4 +49,8 @@ public interface EmailTemplateRepository extends JpaRepository<EmailTemplate, Lo
 
     // Find templates by type across all users (for system defaults)
     List<EmailTemplate> findByType(EmailTemplate.TemplateType type);
+
+    // Find default template by organization ID and type (for campaign integration)
+    @Query("SELECT t FROM EmailTemplate t WHERE t.user.organization.id = :orgId AND t.type = :type AND t.isDefault = true")
+    List<EmailTemplate> findByOrgIdAndTypeAndIsDefaultTrue(@Param("orgId") Long orgId, @Param("type") EmailTemplate.TemplateType type);
 }

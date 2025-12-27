@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -148,6 +149,32 @@ public class EmailTemplateController {
         User user = getCurrentUser(authentication);
         emailTemplateService.createDefaultTemplatesForUser(user);
         return ResponseEntity.ok().build();
+    }
+
+    // NEW: Force create default templates (bypasses the hasCompliantTemplates check)
+    @PostMapping("/force-create-defaults")
+    public ResponseEntity<Map<String, Object>> forceCreateDefaultTemplates(Authentication authentication) {
+        try {
+            User user = getCurrentUser(authentication);
+
+            // Directly call createGoogleCompliantTemplates (bypasses the check)
+            emailTemplateService.createGoogleCompliantTemplates(user);
+
+            // Get the created templates
+            List<EmailTemplateDto> templates = emailTemplateService.getAllTemplatesByUser(user);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Templates created successfully");
+            response.put("count", templates.size());
+            response.put("templates", templates);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("error", e.getMessage());
+            errorResponse.put("success", false);
+            return ResponseEntity.status(500).body(errorResponse);
+        }
     }
 
     @GetMapping("/types")

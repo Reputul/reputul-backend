@@ -5,9 +5,11 @@ import com.reputul.backend.dto.campaign.request.CreateStepRequest;
 import com.reputul.backend.dto.campaign.request.UpdateSequenceRequest;
 import com.reputul.backend.models.campaign.CampaignSequence;
 import com.reputul.backend.models.campaign.CampaignStep;
+import com.reputul.backend.models.EmailTemplate;
 import com.reputul.backend.enums.MessageType;
 import com.reputul.backend.repositories.campaign.CampaignSequenceRepository;
 import com.reputul.backend.repositories.campaign.CampaignStepRepository;
+import com.reputul.backend.repositories.EmailTemplateRepository;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ public class CampaignSequenceService {
 
     private final CampaignSequenceRepository sequenceRepository;
     private final CampaignStepRepository stepRepository;
+    private final EmailTemplateRepository emailTemplateRepository;
 
     /**
      * Create a new campaign sequence with steps
@@ -294,21 +297,28 @@ public class CampaignSequenceService {
     private CreateSequenceRequest buildGetReviewsCampaign() {
         CreateSequenceRequest request = new CreateSequenceRequest();
         request.setName("Get Reviews");
-        request.setDescription("Convert happy customers into 5-star reviews with our proven 3-step SMS sequence");
+        request.setDescription("Proven 4-step sequence: SMS + 3 professional emails to maximize review collection");
         request.setIsDefault(true); // This is the default campaign
 
         List<CreateStepRequest> steps = List.of(
-                // Step 1: Immediate SMS
+                // Step 1: Immediate SMS (simple, friendly, personal)
                 createStepRequest(1, 0, MessageType.SMS, null,
-                        "Hi {{customer_name}}! If you loved {{business_name}} would you mind leaving us a review? Thanks! {{review_link}}"),
+                        "Hi {{customer_name}}! Thanks for choosing {{business_name}}. We'd love your feedback: {{review_link}} Reply STOP to opt out."),
 
-                // Step 2: Follow-up after 2 days
-                createStepRequest(2, 48, MessageType.SMS, null,
-                        "Hi {{customer_name}}! Just wanted to make sure you had a great experience with {{business_name}}. Would you mind sharing a quick review? {{review_link}}"),
+                // Step 2: Professional email after 3 days - Uses "Initial Review Request" template
+                createStepRequestWithTemplate(2, 72, MessageType.EMAIL_PROFESSIONAL,
+                        "We'd love your feedback, {{customer_name}}!",
+                        "INITIAL_REQUEST"), // Will map to template type
 
-                // Step 3: Final reminder after 5 days
-                createStepRequest(3, 120, MessageType.SMS, null,
-                        "Hello {{customer_name}}! It's {{business_owner}} from {{business_name}}. We all love checking in with past customers. Mind leaving us a review? {{review_link}}")
+                // Step 3: Follow-up email after 7 days - Uses "7-Day Follow-up" template
+                createStepRequestWithTemplate(3, 168, MessageType.EMAIL_PROFESSIONAL,
+                        "Your opinion matters - {{business_name}}",
+                        "FOLLOW_UP_7_DAY"),
+
+                // Step 4: Final email after 14 days - Uses "14-Day Final Follow-up" template
+                createStepRequestWithTemplate(4, 336, MessageType.EMAIL_PROFESSIONAL,
+                        "Final request: Share your {{business_name}} experience",
+                        "FOLLOW_UP_14_DAY")
         );
 
         request.setSteps(steps);
@@ -432,8 +442,12 @@ public class CampaignSequenceService {
             throw new IllegalArgumentException("Message type is required");
         }
 
-        if (stepRequest.getBodyTemplate() == null || stepRequest.getBodyTemplate().trim().isEmpty()) {
-            throw new IllegalArgumentException("Body template is required");
+        // Body template is required UNLESS using email template type (for email steps)
+        boolean hasBodyTemplate = stepRequest.getBodyTemplate() != null && !stepRequest.getBodyTemplate().trim().isEmpty();
+        boolean hasEmailTemplateType = stepRequest.getEmailTemplateType() != null && !stepRequest.getEmailTemplateType().trim().isEmpty();
+
+        if (!hasBodyTemplate && !hasEmailTemplateType) {
+            throw new IllegalArgumentException("Body template or email template type is required");
         }
 
         // Email messages require a subject
@@ -460,8 +474,45 @@ public class CampaignSequenceService {
         step.setDelayHours(stepRequest.getDelayHours());
         step.setMessageType(stepRequest.getMessageType());
         step.setSubjectTemplate(stepRequest.getSubjectTemplate());
-        step.setBodyTemplate(stepRequest.getBodyTemplate());
+
+        // Set bodyTemplate - use placeholder if using email template type
+        if (stepRequest.getBodyTemplate() != null && !stepRequest.getBodyTemplate().trim().isEmpty()) {
+            step.setBodyTemplate(stepRequest.getBodyTemplate());
+        } else if (stepRequest.getEmailTemplateType() != null) {
+            // Placeholder for email steps using templates
+            step.setBodyTemplate("[Uses Email Template: " + stepRequest.getEmailTemplateType() + "]");
+        } else {
+            step.setBodyTemplate(""); // Empty fallback
+        }
+
         step.setIsActive(true);
+
+        // NEW: Resolve email template type to actual template ID
+        if (stepRequest.getEmailTemplateType() != null && stepRequest.getMessageType().isEmail()) {
+            try {
+                EmailTemplate.TemplateType templateType = EmailTemplate.TemplateType.valueOf(stepRequest.getEmailTemplateType());
+
+                // Find the default template of this type for the organization
+                EmailTemplate template = emailTemplateRepository.findByOrgIdAndTypeAndIsDefaultTrue(
+                                sequence.getOrgId(), templateType)
+                        .stream()
+                        .findFirst()
+                        .orElse(null);
+
+                if (template != null) {
+                    step.setEmailTemplateId(template.getId());
+                    log.info("Linked campaign step {} to email template {} (type: {})",
+                            stepRequest.getStepNumber(), template.getId(), templateType);
+                } else {
+                    log.warn("No default email template found for type {} in org {}. Step will use fallback body template.",
+                            templateType, sequence.getOrgId());
+                }
+            } catch (Exception e) {
+                // Don't fail campaign creation if template linking fails
+                log.error("Failed to link email template for step {}: {}. Continuing without template link.",
+                        stepRequest.getStepNumber(), e.getMessage());
+            }
+        }
 
         return stepRepository.save(step);
     }
@@ -474,6 +525,21 @@ public class CampaignSequenceService {
         request.setMessageType(messageType);
         request.setSubjectTemplate(subject);
         request.setBodyTemplate(body);
+        return request;
+    }
+
+    /**
+     * NEW: Create step request with email template type reference
+     * This will be resolved to actual template ID when creating the step
+     */
+    private CreateStepRequest createStepRequestWithTemplate(Integer stepNumber, Integer delayHours,
+                                                            MessageType messageType, String subject, String templateType) {
+        CreateStepRequest request = new CreateStepRequest();
+        request.setStepNumber(stepNumber);
+        request.setDelayHours(delayHours);
+        request.setMessageType(messageType);
+        request.setSubjectTemplate(subject);
+        request.setEmailTemplateType(templateType); // NEW: Store template type for lookup
         return request;
     }
 
