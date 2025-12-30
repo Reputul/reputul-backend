@@ -335,7 +335,7 @@ public class BusinessController {
     /**
      * Manually refresh Google Places data
      *
-     * NEW ENDPOINT: Allows users to re-sync with Google Places API
+     *Allows users to re-sync with Google Places API
      */
     @PostMapping("/{businessId}/refresh-google-places")
     public ResponseEntity<BusinessDto> refreshGooglePlaces(
@@ -354,6 +354,31 @@ public class BusinessController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(null);
+        }
+    }
+
+    /**
+     * Get the current user's business (first business for the user)
+     * GET /api/v1/businesses/mine
+     */
+    @GetMapping("/mine")
+    public ResponseEntity<BusinessDto> getMyBusiness(@AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            String email = userDetails.getUsername();
+            User user = userRepo.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // Get user's first business
+            List<Business> businesses = businessRepo.findByUserId(user.getId());
+
+            if (businesses.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            // Return first business as DTO
+            return ResponseEntity.ok(BusinessMapper.toDto(businesses.get(0)));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
 }

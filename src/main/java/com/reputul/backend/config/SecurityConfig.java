@@ -64,7 +64,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/reviews/public/**").permitAll()
 
                         // Public business endpoints (for public pages)
-                        .requestMatchers(HttpMethod.GET, "/api/v1/businesses/*").permitAll()
+//                        .requestMatchers(HttpMethod.GET, "/api/v1/businesses/*").permitAll()
 
                         // File serving
                         .requestMatchers("/api/v1/files/**").permitAll()
