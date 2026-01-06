@@ -1,4 +1,4 @@
-package com.reputul.platform.entity;
+package com.reputul.backend.platform.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -7,7 +7,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Entity
 @Table(name = "idempotency_keys")
@@ -22,7 +21,7 @@ public class IdempotencyKey {
     private String key;
 
     @Column(name = "organization_id", nullable = false)
-    private UUID organizationId;
+    private Long organizationId;
 
     @Column(name = "request_path", nullable = false, length = 500)
     private String requestPath;

@@ -1,4 +1,4 @@
-package com.reputul.platform.dto.integration;
+package com.reputul.backend.platform.dto.integration;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -8,7 +8,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 /**
  * Response DTO for Zapier webhook requests
@@ -42,7 +41,7 @@ public class ZapierWebhookResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class ContactInfo {
         @JsonProperty("id")
-        private UUID id;
+        private Long id;  // FIXED: Changed from UUID to Long
 
         @JsonProperty("created")
         private boolean created; // true if new, false if updated
@@ -64,7 +63,7 @@ public class ZapierWebhookResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class ReviewRequestInfo {
         @JsonProperty("id")
-        private UUID id;
+        private Long id;  // FIXED: Changed from UUID to Long
 
         @JsonProperty("status")
         private String status;
@@ -95,7 +94,7 @@ public class ZapierWebhookResponse {
     /**
      * Creates a success response for contact creation
      */
-    public static ZapierWebhookResponse contactSuccess(UUID contactId, boolean created, String email, String phone, String name) {
+    public static ZapierWebhookResponse contactSuccess(Long contactId, boolean created, String email, String phone, String name) {
         return ZapierWebhookResponse.builder()
                 .success(true)
                 .message(created ? "Contact created successfully" : "Contact updated successfully")
@@ -113,8 +112,8 @@ public class ZapierWebhookResponse {
      * Creates a success response for review request
      */
     public static ZapierWebhookResponse reviewRequestSuccess(
-            UUID contactId, boolean contactCreated, String email, String phone, String name,
-            UUID requestId, String status, LocalDateTime scheduledSendAt, String deliveryMethod) {
+            Long contactId, boolean contactCreated, String email, String phone, String name,
+            Long requestId, String status, LocalDateTime scheduledSendAt, String deliveryMethod) {
         return ZapierWebhookResponse.builder()
                 .success(true)
                 .message("Contact " + (contactCreated ? "created" : "updated") + " and review request scheduled")

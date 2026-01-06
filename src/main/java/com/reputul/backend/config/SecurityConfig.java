@@ -63,9 +63,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/reviews/business/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/reviews/public/**").permitAll()
 
-                        // Public business endpoints (for public pages)
-//                        .requestMatchers(HttpMethod.GET, "/api/v1/businesses/*").permitAll()
-
                         // File serving
                         .requestMatchers("/api/v1/files/**").permitAll()
 
@@ -74,6 +71,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/webhooks/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/sms/webhook/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/email/webhook/**").permitAll()
+
+                        // Zapier/API integration webhooks (API key auth, not JWT)  // ADD THIS
+                        .requestMatchers("/api/v1/integrations/zapier/**").permitAll()  // ADD THIS
 
                         // Stripe webhook endpoints (MUST be public)
                         .requestMatchers(HttpMethod.POST, "/api/billing/webhook/**").permitAll()

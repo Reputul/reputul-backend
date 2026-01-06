@@ -1,4 +1,4 @@
-package com.reputul.platform.entity;
+package com.reputul.backend.platform.entity;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -22,7 +22,7 @@ public class ApiKey {
     private UUID id;
 
     @Column(name = "organization_id", nullable = false)
-    private UUID organizationId;
+    private Long organizationId;
 
     @Column(nullable = false)
     private String name;
@@ -39,14 +39,16 @@ public class ApiKey {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    // FIXED: Changed from UUID to Long to match users.id type
     @Column(name = "created_by", nullable = false)
-    private UUID createdBy;
+    private Long createdBy;
 
     @Column(name = "revoked_at")
     private LocalDateTime revokedAt;
 
+    // FIXED: Changed from UUID to Long to match users.id type
     @Column(name = "revoked_by")
-    private UUID revokedBy;
+    private Long revokedBy;
 
     @PrePersist
     protected void onCreate() {

@@ -1,4 +1,4 @@
-package com.reputul.platform.dto.integration;
+package com.reputul.backend.platform.dto.integration;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;

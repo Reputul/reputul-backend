@@ -44,7 +44,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             "/api/billing/webhook/",  // Stripe webhooks
             "/api/webhooks/",         // Generic webhooks
             "/api/sms/webhook/",      // SMS delivery webhooks (Twilio)
-            "/api/email/webhook/"     // Email webhooks (SendGrid)
+            "/api/email/webhook/",    // Email webhooks
+            "/api/v1/integrations/zapier/"
     );
 
     // Additional paths that need to be completely public (OPTIONS for CORS)
