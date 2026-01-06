@@ -148,7 +148,7 @@ public class PlatformConnectionController {
             return ResponseEntity.ok(Map.of(
                     "authUrl", authUrl,
                     "state", state,
-                    "platform", platform.name()
+                    "com/reputul/backend/platform", platform.name()
             ));
 
         } catch (Exception e) {
@@ -686,7 +686,7 @@ public class PlatformConnectionController {
             Authentication authentication) {
 
         try {
-            String platformType = (String) request.get("platform");
+            String platformType = (String) request.get("com/reputul/backend/platform");
             Long businessId = ((Number) request.get("businessId")).longValue();
 
             User user = getUserFromAuth(authentication);
@@ -758,7 +758,7 @@ public class PlatformConnectionController {
             return ResponseEntity.ok(Map.of(
                     "authUrl", authUrl,
                     "state", state,
-                    "platform", platform.name()
+                    "com/reputul/backend/platform", platform.name()
             ));
 
         } catch (Exception e) {

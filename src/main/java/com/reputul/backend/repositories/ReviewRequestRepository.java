@@ -431,4 +431,90 @@ public interface ReviewRequestRepository extends JpaRepository<ReviewRequest, Lo
     @Modifying
     @Query(value = "DELETE FROM review_requests WHERE status = 'PENDING' AND created_at < :cutoffDate", nativeQuery = true)
     void deleteOldPendingRequests(@Param("cutoffDate") OffsetDateTime cutoffDate);
+
+    /**
+     * Find the most recent review request sent to an email address for a business
+     * within a specific time window (used for 30-day frequency limiting)
+     *
+     * NOTE: Uses recipientEmail field (not email field)
+     *
+     * @param businessId The business ID
+     * @param recipientEmail The customer email
+     * @param sentAfter Only include requests sent after this timestamp
+     * @return The most recent review request if found
+     */
+    @Query("SELECT r FROM ReviewRequest r WHERE r.business.id = :businessId " +
+            "AND r.recipientEmail = :recipientEmail " +
+            "AND r.sentAt IS NOT NULL " +
+            "AND r.sentAt >= :sentAfter " +
+            "ORDER BY r.sentAt DESC")
+    Optional<ReviewRequest> findFirstByBusinessIdAndRecipientEmailAndSentAtAfterOrderBySentAtDesc(
+            @Param("businessId") Long businessId,
+            @Param("recipientEmail") String recipientEmail,
+            @Param("sentAfter") OffsetDateTime sentAfter
+    );
+
+    /**
+     * Find the most recent review request sent to a phone number for a business
+     * within a specific time window (used for 30-day frequency limiting)
+     *
+     * NOTE: Uses recipientPhone field (not phone field)
+     *
+     * @param businessId The business ID
+     * @param recipientPhone The customer phone number
+     * @param sentAfter Only include requests sent after this timestamp
+     * @return The most recent review request if found
+     */
+    @Query("SELECT r FROM ReviewRequest r WHERE r.business.id = :businessId " +
+            "AND r.recipientPhone = :recipientPhone " +
+            "AND r.sentAt IS NOT NULL " +
+            "AND r.sentAt >= :sentAfter " +
+            "ORDER BY r.sentAt DESC")
+    Optional<ReviewRequest> findFirstByBusinessIdAndRecipientPhoneAndSentAtAfterOrderBySentAtDesc(
+            @Param("businessId") Long businessId,
+            @Param("recipientPhone") String recipientPhone,
+            @Param("sentAfter") OffsetDateTime sentAfter
+    );
+
+    /**
+     * Find the most recent review request CREATED for an email address for a business
+     * within a specific time window (used for 30-day frequency limiting)
+     *
+     * NOTE: Uses createdAt instead of sentAt to catch PENDING requests too
+     *
+     * @param businessId The business ID
+     * @param recipientEmail The customer email
+     * @param createdAfter Only include requests created after this timestamp
+     * @return The most recent review request if found
+     */
+    @Query("SELECT r FROM ReviewRequest r WHERE r.business.id = :businessId " +
+            "AND r.recipientEmail = :recipientEmail " +
+            "AND r.createdAt >= :createdAfter " +
+            "ORDER BY r.createdAt DESC")
+    Optional<ReviewRequest> findFirstByBusinessIdAndRecipientEmailAndCreatedAtAfterOrderByCreatedAtDesc(
+            @Param("businessId") Long businessId,
+            @Param("recipientEmail") String recipientEmail,
+            @Param("createdAfter") OffsetDateTime createdAfter
+    );
+
+    /**
+     * Find the most recent review request CREATED for a phone number for a business
+     * within a specific time window (used for 30-day frequency limiting)
+     *
+     * NOTE: Uses createdAt instead of sentAt to catch PENDING requests too
+     *
+     * @param businessId The business ID
+     * @param recipientPhone The customer phone number
+     * @param createdAfter Only include requests created after this timestamp
+     * @return The most recent review request if found
+     */
+    @Query("SELECT r FROM ReviewRequest r WHERE r.business.id = :businessId " +
+            "AND r.recipientPhone = :recipientPhone " +
+            "AND r.createdAt >= :createdAfter " +
+            "ORDER BY r.createdAt DESC")
+    Optional<ReviewRequest> findFirstByBusinessIdAndRecipientPhoneAndCreatedAtAfterOrderByCreatedAtDesc(
+            @Param("businessId") Long businessId,
+            @Param("recipientPhone") String recipientPhone,
+            @Param("createdAfter") OffsetDateTime createdAfter
+    );
 }

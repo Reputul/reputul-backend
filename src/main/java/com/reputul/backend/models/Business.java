@@ -104,6 +104,10 @@ public class Business {
     @Builder.Default
     private Boolean reviewPlatformsConfigured = false;
 
+    @Column(name = "is_default")
+    @Builder.Default
+    private Boolean isDefault = false;
+
     // ===== EXISTING: User relationship (kept for backward compatibility) =====
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
@@ -224,5 +228,19 @@ public class Business {
     public boolean needsGooglePlaceRefresh() {
         if (googlePlaceLastSynced == null) return true;
         return googlePlaceLastSynced.isBefore(OffsetDateTime.now().minusDays(30));
+    }
+
+    /**
+     * Check if this is the default business for the organization
+     */
+    public boolean isDefaultBusiness() {
+        return isDefault != null && isDefault;
+    }
+
+    /**
+     * Mark this business as the default for its organization
+     */
+    public void setAsDefault() {
+        this.isDefault = true;
     }
 }

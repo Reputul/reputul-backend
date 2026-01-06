@@ -193,4 +193,17 @@ public interface BusinessRepository extends JpaRepository<Business, Long> {
      */
     @Query("SELECT b FROM Business b WHERE b.user.email = :email")
     List<Business> findByUserEmail(@Param("email") String email);
+
+    /**
+     * Find the default business for an organization
+     * Used by API integrations when business_id is not specified
+     */
+    @Query("SELECT b FROM Business b WHERE b.organization.id = :organizationId AND b.isDefault = true")
+    Optional<Business> findDefaultByOrganizationId(@Param("organizationId") Long organizationId);
+
+    /**
+     * Check if an organization has a default business set
+     */
+    @Query("SELECT COUNT(b) > 0 FROM Business b WHERE b.organization.id = :organizationId AND b.isDefault = true")
+    boolean hasDefaultBusiness(@Param("organizationId") Long organizationId);
 }
