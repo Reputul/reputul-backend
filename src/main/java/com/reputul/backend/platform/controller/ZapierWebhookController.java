@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -160,24 +161,45 @@ public class ZapierWebhookController {
     }
 
     /**
-     * Health check endpoint for Zapier to verify connectivity
+     * CHANGED: Public health check endpoint for Zapier to verify connectivity
+     * No authentication required - this is a standard practice for health checks
      * GET /api/v1/integrations/zapier/health
      */
     @GetMapping("/health")
-    public ResponseEntity<Map<String, String>> health(
-            @RequestHeader(value = "X-API-Key", required = true) String apiKey) {
+    public ResponseEntity<Map<String, Object>> health(
+            @RequestHeader(value = "X-API-Key", required = false) String apiKey) {
 
-        // Authenticate API key
-        Optional<Long> organizationId = apiKeyService.authenticateApiKey(apiKey);
-        if (organizationId.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("status", "error", "message", "Invalid API key"));
+        // If API key provided, validate it and return organization-specific info
+        if (apiKey != null && !apiKey.trim().isEmpty()) {
+            Optional<Long> organizationId = apiKeyService.authenticateApiKey(apiKey);
+            if (organizationId.isPresent()) {
+                log.info("Authenticated health check for organization {}", organizationId.get());
+                return ResponseEntity.ok(Map.of(
+                        "status", "ok",
+                        "service", "Reputul Zapier API",
+                        "authenticated", true,
+                        "organization_id", organizationId.get(),
+                        "timestamp", OffsetDateTime.now().toString()
+                ));
+            } else {
+                log.warn("Invalid API key provided for health check");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of(
+                                "status", "error",
+                                "message", "Invalid API key",
+                                "timestamp", OffsetDateTime.now().toString()
+                        ));
+            }
         }
 
+        // Public health check - no API key required
+        log.debug("Public health check request");
         return ResponseEntity.ok(Map.of(
                 "status", "ok",
-                "organization_id", organizationId.get().toString(),
-                "message", "Reputul API is healthy"
+                "service", "Reputul Zapier API",
+                "authenticated", false,
+                "timestamp", OffsetDateTime.now().toString(),
+                "message", "API is healthy and accepting requests"
         ));
     }
 
