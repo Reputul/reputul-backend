@@ -17,6 +17,30 @@ import java.util.Optional;
 @Repository
 public interface BusinessRepository extends JpaRepository<Business, Long> {
 
+    // ==================== ADDED: JOIN FETCH methods to prevent LazyInitializationException ====================
+
+    /**
+     * Find business by ID with organization eagerly loaded
+     * CRITICAL: Use this method instead of findById() when you need to access business.getOrganization()
+     */
+    @Query("SELECT b FROM Business b LEFT JOIN FETCH b.organization WHERE b.id = :id")
+    Optional<Business> findByIdWithOrganization(@Param("id") Long id);
+
+    /**
+     * Find business by ID and organization ID with organization eagerly loaded
+     * CRITICAL: Use this for organization-scoped queries that need the organization object
+     */
+    @Query("SELECT b FROM Business b LEFT JOIN FETCH b.organization o WHERE b.id = :id AND o.id = :organizationId")
+    Optional<Business> findByIdAndOrganizationIdWithOrganization(@Param("id") Long id, @Param("organizationId") Long organizationId);
+
+    /**
+     * Find all businesses for an organization with organization eagerly loaded
+     */
+    @Query("SELECT b FROM Business b LEFT JOIN FETCH b.organization o WHERE o.id = :organizationId ORDER BY b.createdAt ASC")
+    List<Business> findByOrganizationIdWithOrganization(@Param("organizationId") Long organizationId);
+
+    // ==================== EXISTING METHODS ====================
+
     /**
      * Find business by ID and user ID (tenant scoping - security critical)
      * This ensures users can only access their own businesses

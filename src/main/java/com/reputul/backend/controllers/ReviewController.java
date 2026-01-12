@@ -63,7 +63,8 @@ public class ReviewController {
                                           @RequestBody Review review,
                                           @AuthenticationPrincipal UserDetails userDetails) {
         try {
-            Business business = businessRepo.findById(businessId)
+            // CHANGED: Use findByIdWithOrganization to eagerly load organization
+            Business business = businessRepo.findByIdWithOrganization(businessId)
                     .orElse(null);
 
             if (business == null) {
@@ -99,11 +100,18 @@ public class ReviewController {
             User user = userRepo.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
-            Business business = businessRepo.findById(businessId)
+            // CHANGED: Use findByIdWithOrganization to eagerly load organization
+            Business business = businessRepo.findByIdWithOrganization(businessId)
                     .orElse(null);
 
             if (business == null) {
                 return ResponseEntity.notFound().build();
+            }
+
+            // FIXED: Null-safe organization check before accessing
+            if (business.getOrganization() == null) {
+                log.error("Business {} has no associated organization - data integrity issue!", businessId);
+                return ResponseEntity.status(500).body(Map.of("error", "Business configuration error"));
             }
 
             // FIXED: Verify organization-based access instead of just user ownership
@@ -131,7 +139,7 @@ public class ReviewController {
         }
     }
 
-    // ✅ BEST FIX: All reviews for a specific business using DTO to avoid Hibernate issues
+    // ✅ FIXED: All reviews for a specific business using DTO to avoid Hibernate issues
     @GetMapping("/business/{businessId}")
     @Transactional // Keep transaction open for the query
     public ResponseEntity<?> getReviewsByBusiness(
@@ -146,13 +154,19 @@ public class ReviewController {
             User user = userRepo.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
-            // Verify business belongs to user's organization
-            Business business = businessRepo.findById(businessId)
+            // CHANGED: Use findByIdWithOrganization to eagerly load organization
+            Business business = businessRepo.findByIdWithOrganization(businessId)
                     .orElse(null);
 
             if (business == null) {
                 log.warn("Business {} not found", businessId);
                 return ResponseEntity.notFound().build();
+            }
+
+            // FIXED: Null-safe organization check before accessing
+            if (business.getOrganization() == null) {
+                log.error("Business {} has no associated organization - data integrity issue!", businessId);
+                return ResponseEntity.status(500).body(Map.of("error", "Business configuration error"));
             }
 
             // Check organization-based access
@@ -213,6 +227,12 @@ public class ReviewController {
             String email = userDetails.getUsername();
             User user = userRepo.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // FIXED: Null-safe organization check before accessing
+            if (review.getBusiness() == null || review.getBusiness().getOrganization() == null) {
+                log.error("Review {} or its business has no associated organization - data integrity issue!", reviewId);
+                return ResponseEntity.status(500).body(Map.of("error", "Review configuration error"));
+            }
 
             // FIXED: Check organization-based access instead of just user ownership
             if (!review.getBusiness().getOrganization().getId().equals(user.getOrganization().getId())) {
@@ -371,6 +391,12 @@ public class ReviewController {
             // Find the review
             Review review = reviewRepo.findById(reviewId)
                     .orElseThrow(() -> new IllegalArgumentException("Review not found"));
+
+            // FIXED: Null-safe organization check before accessing
+            if (review.getBusiness() == null || review.getBusiness().getOrganization() == null) {
+                log.error("Review {} or its business has no associated organization - data integrity issue!", reviewId);
+                return ResponseEntity.status(500).body(Map.of("error", "Review configuration error"));
+            }
 
             // Verify ownership
             if (!review.getBusiness().getOrganization().getId().equals(user.getOrganization().getId())) {
