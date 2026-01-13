@@ -1,6 +1,8 @@
 package com.reputul.backend.repositories;
 
 import com.reputul.backend.models.Review;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -376,4 +378,9 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
      */
     @Query("SELECT r FROM Review r WHERE r.business.id = :businessId AND r.rating <= 3 AND r.source IN ('public', 'manual') ORDER BY r.createdAt DESC")
     List<Review> findReviewsNeedingAttention(@Param("businessId") Long businessId);
+
+    /**
+     * Find reviews by organization ID (for Zapier trigger)
+     */
+    Page<Review> findByBusinessOrganizationId(Long organizationId, Pageable pageable);
 }

@@ -93,7 +93,8 @@ public class AuthController {
                 .name(request.getName())
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
-                .organization(organization) // SET THE ORGANIZATION
+                .role(User.UserRole.OWNER)
+                .organization(organization)
                 .build();
 
         User savedUser = userRepository.save(newUser);
