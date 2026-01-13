@@ -1,23 +1,28 @@
 package com.reputul.backend.platform.controller;
 
+import com.reputul.backend.models.Review;
 import com.reputul.backend.platform.dto.integration.ZapierContactRequest;
 import com.reputul.backend.platform.dto.integration.ZapierReviewRequestRequest;
 import com.reputul.backend.platform.dto.integration.ZapierWebhookResponse;
 import com.reputul.backend.platform.service.ApiKeyService;
 import com.reputul.backend.platform.service.ZapierWebhookService;
+import com.reputul.backend.repositories.ReviewRepository;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -31,15 +36,20 @@ public class ZapierWebhookController {
 
     private final ZapierWebhookService zapierWebhookService;
     private final ApiKeyService apiKeyService;
+    private final ReviewRepository reviewRepository;
 
     // Rate limiting: 1000 requests per hour per API key
     private final Map<String, Bucket> rateLimitBuckets = new ConcurrentHashMap<>();
     private static final long RATE_LIMIT_CAPACITY = 1000;
     private static final Duration RATE_LIMIT_PERIOD = Duration.ofHours(1);
 
-    public ZapierWebhookController(ZapierWebhookService zapierWebhookService, ApiKeyService apiKeyService) {
+    public ZapierWebhookController(
+            ZapierWebhookService zapierWebhookService,
+            ApiKeyService apiKeyService,
+            ReviewRepository reviewRepository) {
         this.zapierWebhookService = zapierWebhookService;
         this.apiKeyService = apiKeyService;
+        this.reviewRepository = reviewRepository;
     }
 
     /**
@@ -161,7 +171,7 @@ public class ZapierWebhookController {
     }
 
     /**
-     * CHANGED: Public health check endpoint for Zapier to verify connectivity
+     * Public health check endpoint for Zapier to verify connectivity
      * No authentication required - this is a standard practice for health checks
      * GET /api/v1/integrations/zapier/health
      */
@@ -201,6 +211,50 @@ public class ZapierWebhookController {
                 "timestamp", OffsetDateTime.now().toString(),
                 "message", "API is healthy and accepting requests"
         ));
+    }
+
+    /**
+     * NEW: Get recent reviews for Zapier trigger (polling)
+     * GET /api/v1/integrations/zapier/reviews/recent
+     */
+    @GetMapping("/reviews/recent")
+    public ResponseEntity<?> getRecentReviews(
+            @RequestHeader("X-API-Key") String apiKey,
+            @RequestParam(defaultValue = "10") int limit) {
+
+        // Authenticate
+        Optional<Long> orgId = apiKeyService.authenticateApiKey(apiKey);
+        if (orgId.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid API key"));
+        }
+
+        log.info("Fetching recent reviews for organization {}", orgId.get());
+
+        // Get recent reviews for this organization
+        Pageable pageable = PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<Review> reviewPage = reviewRepository.findByBusinessOrganizationId(orgId.get(), pageable);
+
+        // Map to Zapier-friendly format
+        List<Map<String, Object>> zapierReviews = reviewPage.getContent().stream()
+                .map(review -> {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put("id", review.getId().toString());
+                    map.put("business_id", review.getBusiness().getId().toString());
+                    map.put("business_name", review.getBusiness().getName());
+                    map.put("customer_name", review.getCustomerName() != null ? review.getCustomerName() : "");
+                    map.put("customer_email", review.getCustomerEmail() != null ? review.getCustomerEmail() : "");
+                    map.put("rating", review.getRating());
+                    map.put("comment", review.getComment() != null ? review.getComment() : "");
+                    map.put("source", review.getSource());
+                    map.put("created_at", review.getCreatedAt().toString());
+                    map.put("review_url", review.getSourceReviewUrl() != null ? review.getSourceReviewUrl() : "");
+                    return map;
+                })
+                .toList();
+
+        log.info("Returning {} recent reviews for organization {}", zapierReviews.size(), orgId.get());
+        return ResponseEntity.ok(zapierReviews);
     }
 
     /**
