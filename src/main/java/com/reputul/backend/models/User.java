@@ -29,6 +29,10 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
+    // ===== NEW: Phone field for SMS Alerts =====
+    @Column(name = "phone")
+    private String phone;
+
     @NotBlank(message = "Password is required")
     @Column(nullable = false)
     private String password;

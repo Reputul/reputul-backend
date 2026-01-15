@@ -79,4 +79,25 @@ public interface ChannelCredentialRepository extends JpaRepository<ChannelCreden
             String connectionMethod
     );
 
+    /**
+     * Find credentials by platform type and metadata containing a specific value
+     * Native PostgreSQL query for JSONB column search
+     */
+    @Query(value = "SELECT * FROM channel_credentials " +
+            "WHERE platform_type = CAST(:platformType AS text) " +
+            "AND metadata::text LIKE CONCAT('%', :metadataValue, '%')",
+            nativeQuery = true)
+    List<ChannelCredential> findByPlatformTypeAndMetadataContaining(
+            @Param("platformType") String platformType,
+            @Param("metadataValue") String metadataValue
+    );
+
+    /**
+     * Find all credentials by platform type
+     * Used for Facebook data deletion to get all Facebook credentials, then filter by metadata
+     */
+    List<ChannelCredential> findByPlatformType(ChannelCredential.PlatformType platformType);
+
+
+
 }
