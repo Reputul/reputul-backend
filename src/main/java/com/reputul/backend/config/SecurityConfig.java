@@ -79,6 +79,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/billing/webhook/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/billing/webhook/**").permitAll()
 
+                        // Facebook data deletion callback (MUST be public for Facebook to call) ← ADD THIS
+                        .requestMatchers("/api/v1/facebook/data-deletion").permitAll()
+                        .requestMatchers("/api/v1/facebook/data-deletion-status").permitAll()
+
                         // Waitlist endpoints (for landing page)
                         .requestMatchers("/api/v1/waitlist/**").permitAll()
                         .requestMatchers("/api/waitlist/**").permitAll()
