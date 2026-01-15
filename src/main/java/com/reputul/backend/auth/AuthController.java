@@ -11,6 +11,7 @@ import com.reputul.backend.repositories.UserRepository;
 import com.reputul.backend.services.AutomationWorkflowTemplateService;
 import com.reputul.backend.services.PasswordResetService;
 import com.reputul.backend.services.EmailTemplateService;
+import com.reputul.backend.services.SmsService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,6 +49,9 @@ public class AuthController {
 
     @Autowired
     private AutomationWorkflowTemplateService automationWorkflowTemplateService;
+
+    @Autowired
+    private SmsService smsService;
 
     @Autowired
     public AuthController(AuthenticationManager authenticationManager, JwtUtil jwtUtil,
@@ -95,9 +99,29 @@ public class AuthController {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(User.UserRole.OWNER)
                 .organization(organization)
+                .phone(request.getPhone()) // <--- NEW: Save the phone number
                 .build();
 
         User savedUser = userRepository.save(newUser);
+
+        // ---------------------------------------------------------
+        // NEW: SEND WELCOME/COMPLIANCE SMS
+        // ---------------------------------------------------------
+        if (request.getPhone() != null && !request.getPhone().isEmpty()) {
+            try {
+                String welcomeMsg = "Reputul: You are now subscribed to account alerts. " +
+                        "Message frequency varies. Message and data rates may apply. " +
+                        "Reply HELP for help, STOP to cancel.";
+
+                // We use sendTestSms to bypass internal 'eligibility' checks
+                // because the user just consented via the checkbox on the register form.
+                smsService.sendTestSms(request.getPhone(), welcomeMsg);
+                log.info("✅ Sent welcome SMS to new user: {}", request.getEmail());
+            } catch (Exception e) {
+                log.error("❌ Failed to send welcome SMS to user {}: {}", request.getEmail(), e.getMessage());
+                // We do NOT fail registration if SMS fails (non-blocking)
+            }
+        }
 
         // Create default templates for new user
         try {
