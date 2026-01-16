@@ -5,21 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.reputul.backend.exceptions.TokenExpiredException;
 import com.reputul.backend.models.ChannelCredential;
 import lombok.extern.slf4j.Slf4j;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -27,7 +19,8 @@ import java.util.*;
 /**
  * Facebook Page Reviews integration
  *
- * UPDATED: Uses page access token from metadata for API calls
+ * UPDATED: Uses page access token from metadata for API calls.
+ * Removed legacy scraping logic in favor of "Business Asset User Profile Access" feature.
  */
 @Service
 @Slf4j
@@ -219,12 +212,6 @@ public class FacebookClient implements PlatformReviewClient {
             // Fetch ratings/reviews from Facebook Graph API using PAGE token
             List<PlatformReviewDto> apiReviews = fetchReviewsFromGraphAPI(pageAccessToken, pageId);
 
-            // Scrape reviewer names from public page (Graph API doesn't provide names)
-            String pageUrl = getPageUrlFromCredential(credential);
-            if (pageUrl != null) {
-                enrichReviewsWithScrapedNames(apiReviews, pageUrl);
-            }
-
             log.info("Fetched {} Facebook reviews", apiReviews.size());
             return apiReviews;
 
@@ -258,9 +245,10 @@ public class FacebookClient implements PlatformReviewClient {
         try {
             String url = String.format("%s/%s/ratings", GRAPH_API_BASE, pageId);
 
+            // UPDATED: Now requesting reviewer fields including nested picture
             url = UriComponentsBuilder.fromHttpUrl(url)
-                    .queryParam("access_token", pageAccessToken) // ← Using PAGE token now
-                    .queryParam("fields", "id,created_time,rating,review_text,reviewer")
+                    .queryParam("access_token", pageAccessToken)
+                    .queryParam("fields", "id,created_time,rating,review_text,recommendation_type,reviewer{name,id,picture}")
                     .queryParam("limit", "100")
                     .build()
                     .toUriString();
@@ -337,10 +325,8 @@ public class FacebookClient implements PlatformReviewClient {
         String createdTime = rating.has("created_time") ? rating.get("created_time").asText() : "";
         String reviewId = generateDeterministicId(reviewText, createdTime);
 
-        log.info("Facebook review ID (generated): {}", reviewId);
-
         // Facebook uses recommendations (positive/negative), not star ratings
-        // Map to 5-star system: positive=5, negative=1 (like NiceJob does)
+        // Map to 5-star system: positive=5, negative=1
         int ratingValue = 5; // Default to positive
         if (rating.has("recommendation_type")) {
             String recommendationType = rating.get("recommendation_type").asText();
@@ -350,44 +336,50 @@ public class FacebookClient implements PlatformReviewClient {
             ratingValue = hasRecommendation ? 5 : 1;
         }
 
-        // Use empty string as null for consistency (already extracted above)
+        // Use empty string as null for consistency
         if (reviewText.isEmpty()) {
             reviewText = null;
         }
 
-        // Parse created_time (Facebook returns ISO 8601 format: "2024-11-01T18:59:26+0000")
+        // Parse created_time
         OffsetDateTime createdAt = OffsetDateTime.now();
         if (rating.has("created_time")) {
             try {
                 String createdTimeStr = rating.get("created_time").asText();
-
-                // Facebook uses format: "2024-11-01T18:59:26+0000"
-                // Replace +0000 with Z for standard ISO parsing
                 if (createdTimeStr.endsWith("+0000")) {
                     createdTimeStr = createdTimeStr.replace("+0000", "Z");
                 }
-
                 createdAt = OffsetDateTime.parse(createdTimeStr);
-                log.info("Parsed Facebook review date: {}", createdAt);
             } catch (Exception e) {
-                log.error("Failed to parse Facebook timestamp '{}': {}",
-                        rating.has("created_time") ? rating.get("created_time").asText() : "null",
-                        e.getMessage());
-                // Keep default to now() as fallback
+                log.error("Failed to parse Facebook timestamp: {}", e.getMessage());
             }
-        } else {
-            log.warn("Facebook rating {} missing created_time field", rating.has("id") ? rating.get("id").asText() : "unknown");
         }
 
-        // Reviewer info (limited from Graph API)
-        String reviewerName = "Facebook User"; // Default (will be enriched by scraping)
-        if (rating.has("reviewer") && rating.get("reviewer").has("name")) {
-            reviewerName = rating.get("reviewer").get("name").asText();
+        // Reviewer info
+        String reviewerName = "Facebook User";
+        String reviewerImage = null;
+
+        if (rating.has("reviewer")) {
+            JsonNode reviewer = rating.get("reviewer");
+
+            // 1. Get Name
+            if (reviewer.has("name")) {
+                reviewerName = reviewer.get("name").asText();
+            }
+
+            // 2. Get Picture (Nested: picture -> data -> url)
+            if (reviewer.has("picture") &&
+                    reviewer.get("picture").has("data") &&
+                    reviewer.get("picture").get("data").has("url")) {
+
+                reviewerImage = reviewer.get("picture").get("data").get("url").asText();
+            }
         }
 
         return PlatformReviewDto.builder()
                 .platformReviewId(reviewId)
                 .reviewerName(reviewerName)
+                .reviewerPhotoUrl(reviewerImage)
                 .rating(ratingValue)
                 .comment(reviewText)
                 .createdAt(createdAt)
@@ -396,46 +388,10 @@ public class FacebookClient implements PlatformReviewClient {
                 .build();
     }
 
-    private void enrichReviewsWithScrapedNames(List<PlatformReviewDto> reviews, String pageUrl) {
-        try {
-            log.info("Scraping Facebook page for reviewer names: {}", pageUrl);
-
-            Document doc = Jsoup.connect(pageUrl + "/reviews")
-                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    .timeout(10000)
-                    .get();
-
-            Elements reviewElements = doc.select("div[data-ad-comet-preview]");
-            log.info("Found {} review elements on page", reviewElements.size());
-
-            int index = 0;
-            for (Element reviewEl : reviewElements) {
-                if (index >= reviews.size()) break;
-
-                String reviewerName = reviewEl.select("a[role='link'] strong").text();
-                if (reviewerName != null && !reviewerName.isEmpty()) {
-                    reviews.get(index).setReviewerName(reviewerName);
-                    log.debug("Enriched review {} with name: {}", index, reviewerName);
-                }
-
-                index++;
-            }
-
-        } catch (Exception e) {
-            log.warn("Failed to scrape Facebook reviewer names: {}", e.getMessage());
-        }
-    }
-
     private String getPageIdFromCredential(ChannelCredential credential) {
         if (credential.getMetadata() == null) return null;
         Object pageId = credential.getMetadata().get("pageId");
         return pageId != null ? pageId.toString() : null;
-    }
-
-    private String getPageUrlFromCredential(ChannelCredential credential) {
-        if (credential.getMetadata() == null) return null;
-        Object pageUrl = credential.getMetadata().get("pageUrl");
-        return pageUrl != null ? pageUrl.toString() : null;
     }
 
     @Override
