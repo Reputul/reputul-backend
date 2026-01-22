@@ -3,19 +3,17 @@ package com.reputul.backend.services;
 import com.reputul.backend.config.PlanPolicy;
 import com.reputul.backend.models.*;
 import com.reputul.backend.repositories.*;
-import com.stripe.exception.StripeException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.*;
 
 /**
- * Service for tracking and managing usage across the platform
- * with tight integration to Stripe billing for overage charges
+ * Service for tracking and managing usage across the platform.
+ * With the move to fixed plans, this service tracks hard limits
+ * rather than reporting metered usage to Stripe.
  */
 @Service
 @Slf4j
@@ -24,26 +22,25 @@ public class UsageService {
     private final UsageEventRepository usageEventRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final CustomerRepository customerRepository;
-    private final BusinessRepository businessRepository;
+    private final BusinessRepository businessRepository; // Kept for consistency if needed later
     private final PlanPolicy planPolicy;
-    private final StripeService stripeService;
 
     public UsageService(UsageEventRepository usageEventRepository,
                         SubscriptionRepository subscriptionRepository,
                         CustomerRepository customerRepository,
                         BusinessRepository businessRepository,
-                        PlanPolicy planPolicy,
-                        StripeService stripeService) {
+                        PlanPolicy planPolicy) {
         this.usageEventRepository = usageEventRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.customerRepository = customerRepository;
         this.businessRepository = businessRepository;
         this.planPolicy = planPolicy;
-        this.stripeService = stripeService;
     }
 
     /**
-     * Record SMS usage and bill overages to Stripe if necessary
+     * Record SMS usage.
+     * Note: Overage billing has been removed. Overages should be prevented
+     * by calling isOverSmsLimit() before this method.
      */
     @Transactional
     public void recordSmsUsage(Business business, String requestId) {
@@ -51,21 +48,11 @@ public class UsageService {
             // Create usage event
             UsageEvent usageEvent = createUsageEvent(business, UsageEvent.UsageType.SMS_REVIEW_REQUEST_SENT, requestId);
 
-            // Get current period usage for business
-            UsageStats usage = getCurrentPeriodUsage(business);
-
-            // Check if this SMS puts us over the included allowance
-            boolean isOverage = determineIfSmsOverage(business, usage.smsSent + 1);
-
-            if (isOverage) {
-                // Create Stripe usage record for billing
-                createStripeUsageRecord(business, requestId);
-                usageEvent.setOverageBilled(true);
-                log.info("SMS overage billed for business {} - total SMS: {}", business.getId(), usage.smsSent + 1);
-            }
+            // We no longer bill overages, so this is always false
+            usageEvent.setOverageBilled(false);
 
             usageEventRepository.save(usageEvent);
-            log.debug("Recorded SMS usage for business {}, overage: {}", business.getId(), isOverage);
+            log.debug("Recorded SMS usage for business {}", business.getId());
 
         } catch (Exception e) {
             log.error("Failed to record SMS usage for business {}: {}", business.getId(), e.getMessage(), e);
@@ -162,6 +149,8 @@ public class UsageService {
         // Current period usage
         summary.put("smsSent", usage.smsSent);
         summary.put("smsIncluded", entitlement.getIncludedSmsPerMonth());
+
+        // "Overage" now just means "Over limit", not "Billable overage"
         summary.put("smsOverage", Math.max(0, usage.smsSent - entitlement.getIncludedSmsPerMonth()));
 
         summary.put("emailSent", usage.emailSent);
@@ -219,11 +208,20 @@ public class UsageService {
     }
 
     /**
-     * Check if business is over SMS limit
+     * Check if business is over SMS limit.
+     * This should be called by the RequestService before sending.
      */
     public boolean isOverSmsLimit(Business business) {
+        // Beta tester override can be added here or in PlanPolicy
+        // if (business.getOrganization().isBetaTester()) return false;
+
         UsageStats usage = getCurrentPeriodUsage(business);
         PlanPolicy.PlanEntitlement entitlement = getBusinessEntitlement(business);
+
+        if (entitlement.getIncludedSmsPerMonth() == -1) {
+            return false; // Unlimited
+        }
+
         return usage.smsSent >= entitlement.getIncludedSmsPerMonth();
     }
 
@@ -260,35 +258,6 @@ public class UsageService {
                 .createdAt(OffsetDateTime.now())
                 .overageBilled(false)
                 .build();
-    }
-
-    private boolean determineIfSmsOverage(Business business, int totalSmsCount) {
-        PlanPolicy.PlanEntitlement entitlement = getBusinessEntitlement(business);
-        return totalSmsCount > entitlement.getIncludedSmsPerMonth();
-    }
-
-    private void createStripeUsageRecord(Business business, String requestId) {
-        try {
-            Optional<Subscription> subscriptionOpt = subscriptionRepository.findActiveByBusinessId(business.getId());
-            if (subscriptionOpt.isEmpty()) {
-                log.warn("No active subscription found for business {} - cannot bill SMS overage", business.getId());
-                return;
-            }
-
-            Subscription subscription = subscriptionOpt.get();
-            if (subscription.getSmsSubscriptionItemId() == null) {
-                log.warn("No SMS subscription item ID found for business {} - cannot bill SMS overage", business.getId());
-                return;
-            }
-
-            // Create usage record in Stripe for 1 SMS
-            String idempotencyKey = "sms_" + business.getId() + "_" + requestId + "_" + System.currentTimeMillis();
-            stripeService.createUsageRecord(subscription.getSmsSubscriptionItemId(), 1, idempotencyKey);
-
-        } catch (StripeException e) {
-            log.error("Failed to create Stripe usage record for business {}: {}", business.getId(), e.getMessage(), e);
-            throw new RuntimeException("Failed to bill SMS overage", e);
-        }
     }
 
     private PlanPolicy.PlanEntitlement getBusinessEntitlement(Business business) {
@@ -331,7 +300,7 @@ public class UsageService {
     }
 
     private int calculateUsagePercent(long used, int limit) {
-        if (limit <= 0) return 0; // Unlimited
+        if (limit <= 0) return 0; // Unlimited or None
         if (limit == -1) return 0; // Unlimited indicator
         return (int) Math.min(100, (used * 100) / limit);
     }

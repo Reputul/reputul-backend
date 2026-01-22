@@ -9,7 +9,6 @@ import com.reputul.backend.repositories.UserRepository;
 import com.stripe.Stripe;
 import com.stripe.exception.StripeException;
 import com.stripe.model.*;
-import com.stripe.net.RequestOptions;
 import com.stripe.net.Webhook;
 import com.stripe.param.checkout.SessionCreateParams;
 import com.stripe.param.*;
@@ -31,7 +30,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * - Webhook event processing
  * - Subscription lifecycle management
  * - Customer management
- * - Usage tracking integration
  */
 @Service
 @Slf4j
@@ -51,9 +49,6 @@ public class StripeService {
 
     @Value("${stripe.price.growth}")
     private String stripePriceGrowth;
-
-    @Value("${stripe.price.sms.metered}")
-    private String stripePriceSmsMetered;
 
     @Value("${stripe.coupon.100.off}")
     private String stripeCoupon100Off;
@@ -142,16 +137,13 @@ public class StripeService {
             metadata.put("promoKind", "BETA_3_FREE_THEN_50");
         }
 
-        // Create checkout session with subscription + metered SMS
+        // Create checkout session
         SessionCreateParams.Builder paramsBuilder = SessionCreateParams.builder()
                 .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
                 .setCustomer(stripeCustomer.getId())
                 .addLineItem(SessionCreateParams.LineItem.builder()
                         .setPrice(priceId)
                         .setQuantity(1L)
-                        .build())
-                .addLineItem(SessionCreateParams.LineItem.builder()
-                        .setPrice(stripePriceSmsMetered)
                         .build())
                 .setSuccessUrl(frontendUrl + "/account/billing?session_id={CHECKOUT_SESSION_ID}")
                 .setCancelUrl(frontendUrl + "/pricing")
@@ -209,33 +201,6 @@ public class StripeService {
     }
 
     /**
-     * Create usage record for metered billing (SMS)
-     */
-    public void createUsageRecord(String subscriptionItemId, int quantity, String idempotencyKey) throws StripeException {
-        if (subscriptionItemId == null || subscriptionItemId.trim().isEmpty()) {
-            throw new IllegalArgumentException("Subscription item ID cannot be null or empty");
-        }
-        if (quantity <= 0) {
-            throw new IllegalArgumentException("Quantity must be positive");
-        }
-        if (idempotencyKey == null || idempotencyKey.trim().isEmpty()) {
-            throw new IllegalArgumentException("Idempotency key cannot be null or empty");
-        }
-
-        UsageRecordCreateOnSubscriptionItemParams params = UsageRecordCreateOnSubscriptionItemParams.builder()
-                .setQuantity((long) quantity)
-                .setTimestamp(Instant.now().getEpochSecond())
-                .setAction(UsageRecordCreateOnSubscriptionItemParams.Action.INCREMENT)
-                .build();
-
-        UsageRecord.createOnSubscriptionItem(subscriptionItemId, params,
-                RequestOptions.builder().setIdempotencyKey(idempotencyKey).build());
-
-        log.info("Created Stripe usage record: {} units for item {} (idempotency: {})",
-                quantity, subscriptionItemId, idempotencyKey);
-    }
-
-    /**
      * Process checkout session completion - create local subscription
      */
     @Transactional
@@ -259,15 +224,6 @@ public class StripeService {
         com.stripe.model.Subscription stripeSubscription =
                 com.stripe.model.Subscription.retrieve(stripeSession.getSubscription());
 
-        // Find SMS subscription item
-        String smsSubscriptionItemId = null;
-        for (SubscriptionItem item : stripeSubscription.getItems().getData()) {
-            if (stripePriceSmsMetered.equals(item.getPrice().getId())) {
-                smsSubscriptionItemId = item.getId();
-                break;
-            }
-        }
-
         // Get or create the primary business for this user
         Business primaryBusiness = businessRepository.findFirstByUserOrderByCreatedAtAsc(user)
                 .orElseThrow(() -> new IllegalArgumentException("No business found for user: " + userId));
@@ -288,7 +244,6 @@ public class StripeService {
                 .status(mapStripeStatus(stripeSubscription.getStatus()))
                 .stripeCustomerId(stripeSubscription.getCustomer())
                 .stripeSubscriptionId(stripeSubscription.getId())
-                .smsSubscriptionItemId(smsSubscriptionItemId)
                 .currentPeriodStart(OffsetDateTime.ofInstant(
                         Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodStart()),
                         ZoneOffset.UTC))
