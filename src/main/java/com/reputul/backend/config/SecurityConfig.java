@@ -76,8 +76,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/integrations/zapier/**").permitAll()  // ADD THIS
 
                         // Stripe webhook endpoints (MUST be public)
-                        .requestMatchers(HttpMethod.POST, "/api/billing/webhook/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/billing/webhook/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/billing/webhook/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/billing/webhook/**").permitAll()
 
                         // Facebook data deletion callback (MUST be public for Facebook to call) ← ADD THIS
                         .requestMatchers("/api/v1/facebook/data-deletion").permitAll()
